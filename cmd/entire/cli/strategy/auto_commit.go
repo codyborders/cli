@@ -18,6 +18,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 
 	"github.com/go-git/go-git/v5"
@@ -972,6 +973,7 @@ func (s *AutoCommitStrategy) InitializeSession(sessionID string, agentType agent
 		SessionID:           sessionID,
 		CLIVersion:          buildinfo.Version,
 		BaseCommit:          baseCommit,
+		Phase:               session.PhaseIdle,
 		StartedAt:           now,
 		LastInteractionTime: &now,
 		TurnID:              turnID.String(),

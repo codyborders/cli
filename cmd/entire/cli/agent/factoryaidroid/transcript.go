@@ -1,9 +1,12 @@
 package factoryaidroid
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +23,99 @@ type (
 	assistantMessage = transcript.AssistantMessage
 	toolInput        = transcript.ToolInput
 )
+
+// droidEnvelope is the top-level structure of a Factory AI Droid JSONL line.
+// Droid wraps messages as {"type":"message","id":"...","message":{"role":"assistant","content":[...]}},
+// unlike Claude Code which uses {"type":"assistant","uuid":"...","message":{"content":[...]}}.
+type droidEnvelope struct {
+	Type    string          `json:"type"`
+	ID      string          `json:"id"`
+	Message json.RawMessage `json:"message"`
+}
+
+// droidMessageRole extracts just the role from the inner message.
+type droidMessageRole struct {
+	Role string `json:"role"`
+}
+
+// ParseDroidTranscript parses a Droid JSONL file into normalized transcript.Line entries.
+// It transforms the Droid envelope format (type="message", role inside message) into the
+// shared transcript.Line format (type="assistant"/"user", message=inner content).
+// Non-message entries (session_start, etc.) are skipped.
+func ParseDroidTranscript(path string, startLine int) ([]transcript.Line, int, error) {
+	file, err := os.Open(path) //nolint:gosec // path is a controlled transcript file path
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open transcript: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	return parseDroidTranscriptFromReader(file, startLine)
+}
+
+// ParseDroidTranscriptFromBytes parses Droid JSONL content from a byte slice.
+func ParseDroidTranscriptFromBytes(content []byte) ([]transcript.Line, error) {
+	lines, _, err := parseDroidTranscriptFromReader(bytes.NewReader(content), 0)
+	return lines, err
+}
+
+func parseDroidTranscriptFromReader(r io.Reader, startLine int) ([]transcript.Line, int, error) {
+	reader := bufio.NewReader(r)
+	var lines []transcript.Line
+	totalLines := 0
+
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return nil, 0, fmt.Errorf("failed to read transcript: %w", err)
+		}
+
+		if len(lineBytes) == 0 {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+
+		if totalLines >= startLine {
+			if line, ok := parseDroidLine(lineBytes); ok {
+				lines = append(lines, line)
+			}
+		}
+		totalLines++
+
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return lines, totalLines, nil
+}
+
+// parseDroidLine converts a single Droid JSONL line into a normalized transcript.Line.
+// Returns false if the line is not a message entry (e.g., session_start).
+func parseDroidLine(lineBytes []byte) (transcript.Line, bool) {
+	var env droidEnvelope
+	if err := json.Unmarshal(lineBytes, &env); err != nil {
+		return transcript.Line{}, false
+	}
+
+	// Only process "message" type entries — skip session_start, etc.
+	if env.Type != "message" {
+		return transcript.Line{}, false
+	}
+
+	// Extract role from the inner message
+	var role droidMessageRole
+	if err := json.Unmarshal(env.Message, &role); err != nil {
+		return transcript.Line{}, false
+	}
+
+	return transcript.Line{
+		Type:    role.Role, // "assistant" or "user"
+		UUID:    env.ID,
+		Message: env.Message,
+	}, true
+}
 
 // SerializeTranscript converts transcript lines back to JSONL bytes.
 func SerializeTranscript(lines []TranscriptLine) ([]byte, error) {
@@ -124,9 +220,9 @@ func CalculateTokenUsageFromFile(path string, startLine int) (*agent.TokenUsage,
 		return &agent.TokenUsage{}, nil
 	}
 
-	lines, _, err := transcript.ParseFromFileAtLine(path, startLine)
+	lines, _, err := ParseDroidTranscript(path, startLine)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // caller adds context
+		return nil, err
 	}
 
 	return CalculateTokenUsage(lines), nil
@@ -231,8 +327,8 @@ func CalculateTotalTokenUsageFromTranscript(transcriptPath string, startLine int
 		return &agent.TokenUsage{}, nil
 	}
 
-	// Parse transcript once
-	parsed, _, err := transcript.ParseFromFileAtLine(transcriptPath, startLine)
+	// Parse transcript once using Droid-specific parser
+	parsed, _, err := ParseDroidTranscript(transcriptPath, startLine)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transcript: %w", err)
 	}
@@ -277,8 +373,8 @@ func ExtractAllModifiedFilesFromTranscript(transcriptPath string, startLine int,
 		return nil, nil
 	}
 
-	// Parse main transcript once
-	parsed, _, err := transcript.ParseFromFileAtLine(transcriptPath, startLine)
+	// Parse main transcript once using Droid-specific parser
+	parsed, _, err := ParseDroidTranscript(transcriptPath, startLine)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transcript: %w", err)
 	}
@@ -297,7 +393,7 @@ func ExtractAllModifiedFilesFromTranscript(transcriptPath string, startLine int,
 	agentIDs := ExtractSpawnedAgentIDs(parsed)
 	for agentID := range agentIDs {
 		agentPath := filepath.Join(subagentsDir, fmt.Sprintf("agent-%s.jsonl", agentID))
-		agentLines, _, agentErr := transcript.ParseFromFileAtLine(agentPath, 0)
+		agentLines, _, agentErr := ParseDroidTranscript(agentPath, 0)
 		if agentErr != nil {
 			// Subagent transcript may not exist yet or may have been cleaned up
 			continue

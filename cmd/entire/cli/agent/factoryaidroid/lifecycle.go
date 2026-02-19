@@ -1,17 +1,13 @@
 package factoryaidroid
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
-	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/textutil"
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
 )
@@ -19,7 +15,6 @@ import (
 // Compile-time interface assertions.
 var (
 	_ agent.TranscriptAnalyzer     = (*FactoryAIDroidAgent)(nil)
-	_ agent.TranscriptPreparer     = (*FactoryAIDroidAgent)(nil)
 	_ agent.TokenCalculator        = (*FactoryAIDroidAgent)(nil)
 	_ agent.SubagentAwareExtractor = (*FactoryAIDroidAgent)(nil)
 )
@@ -59,16 +54,16 @@ func (f *FactoryAIDroidAgent) ParseHookEvent(hookName string, stdin io.Reader) (
 
 // GetTranscriptPosition returns the current line count of the JSONL transcript.
 func (f *FactoryAIDroidAgent) GetTranscriptPosition(path string) (int, error) {
-	_, pos, err := transcript.ParseFromFileAtLine(path, 0)
+	_, pos, err := ParseDroidTranscript(path, 0)
 	if err != nil {
-		return 0, err //nolint:wrapcheck // caller adds context
+		return 0, err
 	}
 	return pos, nil
 }
 
 // ExtractModifiedFilesFromOffset extracts files modified since a given line offset.
 func (f *FactoryAIDroidAgent) ExtractModifiedFilesFromOffset(path string, startOffset int) ([]string, int, error) {
-	lines, currentPos, err := transcript.ParseFromFileAtLine(path, startOffset)
+	lines, currentPos, err := ParseDroidTranscript(path, startOffset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to parse transcript: %w", err)
 	}
@@ -78,7 +73,7 @@ func (f *FactoryAIDroidAgent) ExtractModifiedFilesFromOffset(path string, startO
 
 // ExtractPrompts extracts user prompts from the transcript starting at the given line offset.
 func (f *FactoryAIDroidAgent) ExtractPrompts(sessionRef string, fromOffset int) ([]string, error) {
-	lines, _, err := transcript.ParseFromFileAtLine(sessionRef, fromOffset)
+	lines, _, err := ParseDroidTranscript(sessionRef, fromOffset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transcript: %w", err)
 	}
@@ -98,14 +93,19 @@ func (f *FactoryAIDroidAgent) ExtractPrompts(sessionRef string, fromOffset int) 
 
 // ExtractSummary extracts the last assistant message as a session summary.
 func (f *FactoryAIDroidAgent) ExtractSummary(sessionRef string) (string, error) {
-	data, err := os.ReadFile(sessionRef) //nolint:gosec // Path comes from agent hook input
+	lines, err := func() ([]transcript.Line, error) {
+		data, readErr := os.ReadFile(sessionRef) //nolint:gosec // Path comes from agent hook input
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read transcript: %w", readErr)
+		}
+		parsed, parseErr := ParseDroidTranscriptFromBytes(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("failed to parse transcript: %w", parseErr)
+		}
+		return parsed, nil
+	}()
 	if err != nil {
-		return "", fmt.Errorf("failed to read transcript: %w", err)
-	}
-
-	lines, parseErr := transcript.ParseFromBytes(data)
-	if parseErr != nil {
-		return "", fmt.Errorf("failed to parse transcript: %w", parseErr)
+		return "", err
 	}
 
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -123,14 +123,6 @@ func (f *FactoryAIDroidAgent) ExtractSummary(sessionRef string) (string, error) 
 		}
 	}
 	return "", nil
-}
-
-// --- TranscriptPreparer ---
-
-// PrepareTranscript waits for Factory Droid's async transcript flush to complete.
-func (f *FactoryAIDroidAgent) PrepareTranscript(sessionRef string) error {
-	waitForTranscriptFlush(sessionRef, time.Now())
-	return nil
 }
 
 // --- TokenCalculator ---
@@ -252,81 +244,4 @@ func (f *FactoryAIDroidAgent) parseCompaction(stdin io.Reader) (*agent.Event, er
 		SessionRef: raw.TranscriptPath,
 		Timestamp:  time.Now(),
 	}, nil
-}
-
-// --- Transcript flush sentinel ---
-
-const stopHookSentinel = "hooks factoryai-droid stop"
-
-func waitForTranscriptFlush(transcriptPath string, hookStartTime time.Time) {
-	const (
-		maxWait      = 3 * time.Second
-		pollInterval = 50 * time.Millisecond
-		tailBytes    = 4096
-		maxSkew      = 2 * time.Second
-	)
-
-	logCtx := logging.WithComponent(context.Background(), "agent.factoryaidroid")
-	deadline := time.Now().Add(maxWait)
-	for time.Now().Before(deadline) {
-		if checkStopSentinel(transcriptPath, tailBytes, hookStartTime, maxSkew) {
-			logging.Debug(logCtx, "transcript flush sentinel found",
-				slog.Duration("wait", time.Since(hookStartTime)),
-			)
-			return
-		}
-		time.Sleep(pollInterval)
-	}
-	logging.Warn(logCtx, "transcript flush sentinel not found within timeout, proceeding",
-		slog.Duration("timeout", maxWait),
-	)
-}
-
-func checkStopSentinel(path string, tailBytes int64, hookStartTime time.Time, maxSkew time.Duration) bool {
-	file, err := os.Open(path) //nolint:gosec // path comes from agent hook input
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return false
-	}
-	offset := info.Size() - tailBytes
-	if offset < 0 {
-		offset = 0
-	}
-	buf := make([]byte, info.Size()-offset)
-	if _, err := file.ReadAt(buf, offset); err != nil {
-		return false
-	}
-
-	lines := strings.Split(string(buf), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || !strings.Contains(line, stopHookSentinel) {
-			continue
-		}
-
-		var entry struct {
-			Timestamp string `json:"timestamp"`
-		}
-		if json.Unmarshal([]byte(line), &entry) != nil || entry.Timestamp == "" {
-			continue
-		}
-		ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
-		if err != nil {
-			ts, err = time.Parse(time.RFC3339, entry.Timestamp)
-			if err != nil {
-				continue
-			}
-		}
-		lowerBound := hookStartTime.Add(-maxSkew)
-		upperBound := hookStartTime.Add(maxSkew)
-		if ts.After(lowerBound) && ts.Before(upperBound) {
-			return true
-		}
-	}
-	return false
 }

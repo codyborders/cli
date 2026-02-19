@@ -33,18 +33,125 @@ func TestSerializeTranscript(t *testing.T) {
 	}
 }
 
+func TestParseDroidTranscript_NormalizesEnvelope(t *testing.T) {
+	t.Parallel()
+
+	// Real Droid format: type is always "message", role is inside the inner message
+	data := []byte(
+		`{"type":"session_start","id":"sess-1","title":"test"}` + "\n" +
+			`{"type":"message","id":"m1","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}` + "\n" +
+			`{"type":"message","id":"m2","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]}}` + "\n",
+	)
+
+	lines, err := ParseDroidTranscriptFromBytes(data)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
+	}
+
+	// session_start should be skipped
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2 (session_start should be skipped)", len(lines))
+	}
+
+	// First line should be normalized to type="user"
+	if lines[0].Type != transcript.TypeUser {
+		t.Errorf("lines[0].Type = %q, want %q", lines[0].Type, transcript.TypeUser)
+	}
+	if lines[0].UUID != "m1" {
+		t.Errorf("lines[0].UUID = %q, want \"m1\"", lines[0].UUID)
+	}
+
+	// Second line should be normalized to type="assistant"
+	if lines[1].Type != transcript.TypeAssistant {
+		t.Errorf("lines[1].Type = %q, want %q", lines[1].Type, transcript.TypeAssistant)
+	}
+	if lines[1].UUID != "m2" {
+		t.Errorf("lines[1].UUID = %q, want \"m2\"", lines[1].UUID)
+	}
+}
+
+func TestParseDroidTranscript_StartLineOffset(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := tmpDir + "/transcript.jsonl"
+
+	data := []byte(
+		`{"type":"session_start","id":"s1"}` + "\n" +
+			`{"type":"message","id":"m1","message":{"role":"user","content":"hello"}}` + "\n" +
+			`{"type":"message","id":"m2","message":{"role":"assistant","content":"hi"}}` + "\n" +
+			`{"type":"message","id":"m3","message":{"role":"user","content":"bye"}}` + "\n",
+	)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	// Read from line 2 onward (skip session_start + first message)
+	lines, totalLines, err := ParseDroidTranscript(path, 2)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscript() error = %v", err)
+	}
+
+	if totalLines != 4 {
+		t.Errorf("totalLines = %d, want 4", totalLines)
+	}
+
+	// Lines 2 and 3 are messages, both should be parsed
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines from offset 2, want 2", len(lines))
+	}
+	if lines[0].Type != transcript.TypeAssistant {
+		t.Errorf("lines[0].Type = %q, want %q", lines[0].Type, transcript.TypeAssistant)
+	}
+	if lines[1].Type != transcript.TypeUser {
+		t.Errorf("lines[1].Type = %q, want %q", lines[1].Type, transcript.TypeUser)
+	}
+}
+
+func TestParseDroidTranscript_RealDroidFormat(t *testing.T) {
+	t.Parallel()
+
+	// Test with a realistic Droid transcript snippet including tool use
+	data := []byte(
+		`{"type":"session_start","id":"5734e7ee","title":"test session"}` + "\n" +
+			`{"type":"message","id":"msg-1","message":{"role":"user","content":[{"type":"text","text":"update main.go"}]}}` + "\n" +
+			`{"type":"message","id":"msg-2","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"/repo/main.go","old_str":"old","new_str":"new"}}]}}` + "\n" +
+			`{"type":"message","id":"msg-3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"success"}]}}` + "\n" +
+			`{"type":"message","id":"msg-4","message":{"role":"assistant","content":[{"type":"text","text":"Done!"}]}}` + "\n",
+	)
+
+	lines, err := ParseDroidTranscriptFromBytes(data)
+	if err != nil {
+		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
+	}
+
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4", len(lines))
+	}
+
+	// Verify ExtractModifiedFiles works with the parsed Droid lines
+	files := ExtractModifiedFiles(lines)
+	if len(files) != 1 {
+		t.Fatalf("ExtractModifiedFiles() got %d files, want 1", len(files))
+	}
+	if files[0] != "/repo/main.go" {
+		t.Errorf("ExtractModifiedFiles() got %q, want /repo/main.go", files[0])
+	}
+}
+
 func TestExtractModifiedFiles(t *testing.T) {
 	t.Parallel()
 
-	data := []byte(`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"foo.go"}}]}}
-{"type":"assistant","uuid":"a2","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"bar.go"}}]}}
-{"type":"assistant","uuid":"a3","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}
-{"type":"assistant","uuid":"a4","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"foo.go"}}]}}
+	// Droid format: {"type":"message","id":"...","message":{"role":"assistant","content":[...]}}
+	data := []byte(`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"foo.go"}}]}}
+{"type":"message","id":"a2","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"bar.go"}}]}}
+{"type":"message","id":"a3","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"message","id":"a4","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"foo.go"}}]}}
 `)
 
-	lines, err := transcript.ParseFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data)
 	if err != nil {
-		t.Fatalf("ParseFromBytes() error = %v", err)
+		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
 	files := ExtractModifiedFiles(lines)
 
@@ -73,12 +180,12 @@ func TestExtractModifiedFiles(t *testing.T) {
 func TestExtractModifiedFiles_NotebookEdit(t *testing.T) {
 	t.Parallel()
 
-	data := []byte(`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/repo/analysis.ipynb"}}]}}
+	data := []byte(`{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/repo/analysis.ipynb"}}]}}
 `)
 
-	lines, err := transcript.ParseFromBytes(data)
+	lines, err := ParseDroidTranscriptFromBytes(data)
 	if err != nil {
-		t.Fatalf("ParseFromBytes() error = %v", err)
+		t.Fatalf("ParseDroidTranscriptFromBytes() error = %v", err)
 	}
 	files := ExtractModifiedFiles(lines)
 
@@ -431,13 +538,14 @@ func TestCalculateTotalTokenUsageFromTranscript_PerCheckpoint(t *testing.T) {
 	// 4: user message 3
 	// 5: assistant response 3 (300/150 tokens)
 
+	// Droid format: outer type is always "message", role is inside the inner message
 	transcriptContent := []byte(
-		`{"type":"user","uuid":"u1","message":{"content":"first prompt"}}` + "\n" +
-			`{"type":"assistant","uuid":"a1","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n" +
-			`{"type":"user","uuid":"u2","message":{"content":"second prompt"}}` + "\n" +
-			`{"type":"assistant","uuid":"a2","message":{"id":"m2","usage":{"input_tokens":200,"output_tokens":100}}}` + "\n" +
-			`{"type":"user","uuid":"u3","message":{"content":"third prompt"}}` + "\n" +
-			`{"type":"assistant","uuid":"a3","message":{"id":"m3","usage":{"input_tokens":300,"output_tokens":150}}}` + "\n",
+		`{"type":"message","id":"u1","message":{"role":"user","content":"first prompt"}}` + "\n" +
+			`{"type":"message","id":"a1","message":{"role":"assistant","id":"m1","usage":{"input_tokens":100,"output_tokens":50}}}` + "\n" +
+			`{"type":"message","id":"u2","message":{"role":"user","content":"second prompt"}}` + "\n" +
+			`{"type":"message","id":"a2","message":{"role":"assistant","id":"m2","usage":{"input_tokens":200,"output_tokens":100}}}` + "\n" +
+			`{"type":"message","id":"u3","message":{"role":"user","content":"third prompt"}}` + "\n" +
+			`{"type":"message","id":"a3","message":{"role":"assistant","id":"m3","usage":{"input_tokens":300,"output_tokens":150}}}` + "\n",
 	)
 	if err := os.WriteFile(transcriptPath, transcriptContent, 0o600); err != nil {
 		t.Fatalf("failed to write transcript: %v", err)
@@ -664,52 +772,55 @@ func writeJSONLFile(t *testing.T, path string, lines ...string) {
 	}
 }
 
-// makeWriteToolLine returns a JSONL assistant line with a Write tool_use for the given file.
-func makeWriteToolLine(t *testing.T, uuid, filePath string) string {
+// makeWriteToolLine returns a Droid-format JSONL line with a Write tool_use for the given file.
+func makeWriteToolLine(t *testing.T, id, filePath string) string {
 	t.Helper()
-	data := mustMarshal(t, map[string]interface{}{
+	innerMsg := mustMarshal(t, map[string]interface{}{
+		"role": "assistant",
 		"content": []map[string]interface{}{
 			{
 				"type":  "tool_use",
-				"id":    "toolu_" + uuid,
+				"id":    "toolu_" + id,
 				"name":  "Write",
 				"input": map[string]string{"file_path": filePath},
 			},
 		},
 	})
 	line := mustMarshal(t, map[string]interface{}{
-		"type":    "assistant",
-		"uuid":    uuid,
-		"message": json.RawMessage(data),
+		"type":    "message",
+		"id":      id,
+		"message": json.RawMessage(innerMsg),
 	})
 	return string(line)
 }
 
-// makeEditToolLine returns a JSONL assistant line with an Edit tool_use for the given file.
-func makeEditToolLine(t *testing.T, uuid, filePath string) string {
+// makeEditToolLine returns a Droid-format JSONL line with an Edit tool_use for the given file.
+func makeEditToolLine(t *testing.T, id, filePath string) string {
 	t.Helper()
-	data := mustMarshal(t, map[string]interface{}{
+	innerMsg := mustMarshal(t, map[string]interface{}{
+		"role": "assistant",
 		"content": []map[string]interface{}{
 			{
 				"type":  "tool_use",
-				"id":    "toolu_" + uuid,
+				"id":    "toolu_" + id,
 				"name":  "Edit",
 				"input": map[string]string{"file_path": filePath},
 			},
 		},
 	})
 	line := mustMarshal(t, map[string]interface{}{
-		"type":    "assistant",
-		"uuid":    uuid,
-		"message": json.RawMessage(data),
+		"type":    "message",
+		"id":      id,
+		"message": json.RawMessage(innerMsg),
 	})
 	return string(line)
 }
 
-// makeTaskToolUseLine returns a JSONL assistant line with a Task tool_use (spawning a subagent).
-func makeTaskToolUseLine(t *testing.T, uuid, toolUseID string) string {
+// makeTaskToolUseLine returns a Droid-format JSONL line with a Task tool_use (spawning a subagent).
+func makeTaskToolUseLine(t *testing.T, id, toolUseID string) string {
 	t.Helper()
-	data := mustMarshal(t, map[string]interface{}{
+	innerMsg := mustMarshal(t, map[string]interface{}{
+		"role": "assistant",
 		"content": []map[string]interface{}{
 			{
 				"type":  "tool_use",
@@ -720,17 +831,18 @@ func makeTaskToolUseLine(t *testing.T, uuid, toolUseID string) string {
 		},
 	})
 	line := mustMarshal(t, map[string]interface{}{
-		"type":    "assistant",
-		"uuid":    uuid,
-		"message": json.RawMessage(data),
+		"type":    "message",
+		"id":      id,
+		"message": json.RawMessage(innerMsg),
 	})
 	return string(line)
 }
 
-// makeTaskResultLine returns a JSONL user line with a tool_result containing agentId.
-func makeTaskResultLine(t *testing.T, uuid, toolUseID, agentID string) string {
+// makeTaskResultLine returns a Droid-format JSONL user line with a tool_result containing agentId.
+func makeTaskResultLine(t *testing.T, id, toolUseID, agentID string) string {
 	t.Helper()
-	data := mustMarshal(t, map[string]interface{}{
+	innerMsg := mustMarshal(t, map[string]interface{}{
+		"role": "user",
 		"content": []map[string]interface{}{
 			{
 				"type":        "tool_result",
@@ -740,9 +852,9 @@ func makeTaskResultLine(t *testing.T, uuid, toolUseID, agentID string) string {
 		},
 	})
 	line := mustMarshal(t, map[string]interface{}{
-		"type":    "user",
-		"uuid":    uuid,
-		"message": json.RawMessage(data),
+		"type":    "message",
+		"id":      id,
+		"message": json.RawMessage(innerMsg),
 	})
 	return string(line)
 }
