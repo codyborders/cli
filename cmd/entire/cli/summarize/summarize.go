@@ -119,12 +119,7 @@ func BuildCondensedTranscriptFromBytes(content []byte, agentType agent.AgentType
 	case agent.AgentTypeGemini:
 		return buildCondensedTranscriptFromGemini(content)
 	case agent.AgentTypeFactoryAIDroid:
-		// Droid has its own envelope format — normalize before condensing
-		droidLines, err := factoryaidroid.ParseDroidTranscriptFromBytes(content)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse Droid transcript: %w", err)
-		}
-		return BuildCondensedTranscript(droidLines), nil
+		return buildCondensedTranscriptFromDroid(content)
 	case agent.AgentTypeOpenCode:
 		return buildCondensedTranscriptFromOpenCode(content)
 	case agent.AgentTypeClaudeCode, agent.AgentTypeUnknown:
@@ -214,6 +209,15 @@ func buildCondensedTranscriptFromOpenCode(content []byte) ([]Entry, error) {
 	}
 
 	return entries, nil
+}
+
+// buildCondensedTranscriptFromDroid parses Droid transcript and extracts a condensed view.
+func buildCondensedTranscriptFromDroid(content []byte) ([]Entry, error) {
+	droidLines, err := factoryaidroid.ParseDroidTranscriptFromBytes(content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Droid transcript: %w", err)
+	}
+	return BuildCondensedTranscript(droidLines), nil
 }
 
 // extractGenericToolDetail extracts an appropriate detail string from a tool's input/args map.

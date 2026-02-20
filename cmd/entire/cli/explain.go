@@ -536,7 +536,7 @@ func scopeTranscriptForCheckpoint(fullTranscript []byte, startOffset int, agentT
 	switch agentType {
 	case agent.AgentTypeGemini:
 		return geminicli.SliceFromMessage(fullTranscript, startOffset)
-	case agent.AgentTypeClaudeCode, agent.AgentTypeOpenCode, agent.AgentTypeUnknown:
+	case agent.AgentTypeClaudeCode, agent.AgentTypeOpenCode, agent.AgentTypeFactoryAIDroid, agent.AgentTypeUnknown:
 		return transcript.SliceFromLine(fullTranscript, startOffset)
 	}
 	return transcript.SliceFromLine(fullTranscript, startOffset)
@@ -1536,7 +1536,7 @@ func transcriptOffset(transcriptBytes []byte, agentType agent.AgentType) int {
 			return 0
 		}
 		return len(t.Messages)
-	case agent.AgentTypeClaudeCode, agent.AgentTypeOpenCode, agent.AgentTypeUnknown:
+	case agent.AgentTypeClaudeCode, agent.AgentTypeOpenCode, agent.AgentTypeFactoryAIDroid, agent.AgentTypeUnknown:
 		return countLines(transcriptBytes)
 	}
 	return countLines(transcriptBytes)
