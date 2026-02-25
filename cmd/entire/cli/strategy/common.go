@@ -65,7 +65,8 @@ func EnsureSetup() error {
 
 	// Install generic hooks (they delegate to strategy at runtime)
 	if !IsGitHookInstalled() {
-		if _, err := InstallGitHook(true, isLocalDev()); err != nil {
+		localDev, absoluteHookPath := hookSettingsFromConfig()
+		if _, err := InstallGitHook(true, localDev, absoluteHookPath); err != nil {
 			return fmt.Errorf("failed to install git hooks: %w", err)
 		}
 	}

@@ -398,7 +398,7 @@ func TestRunUninstall_Force_RemovesGitHooks(t *testing.T) {
 	writeSettings(t, testSettingsEnabled)
 
 	// Install git hooks
-	if _, err := strategy.InstallGitHook(true, false); err != nil {
+	if _, err := strategy.InstallGitHook(true, false, false); err != nil {
 		t.Fatalf("InstallGitHook() error = %v", err)
 	}
 

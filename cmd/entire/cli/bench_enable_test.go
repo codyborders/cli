@@ -34,7 +34,7 @@ func BenchmarkEnableCommand(b *testing.B) {
 			b.StartTimer()
 
 			w := &bytes.Buffer{}
-			if err := setupAgentHooksNonInteractive(w, ag, true, false, false, false); err != nil {
+			if err := setupAgentHooksNonInteractive(w, ag, EnableOptions{LocalDev: true}); err != nil {
 				b.Fatalf("setupAgentHooksNonInteractive: %v", err)
 			}
 		}
@@ -49,7 +49,7 @@ func BenchmarkEnableCommand(b *testing.B) {
 
 		// First enable to set up everything
 		w := &bytes.Buffer{}
-		if err := setupAgentHooksNonInteractive(w, ag, true, false, false, false); err != nil {
+		if err := setupAgentHooksNonInteractive(w, ag, EnableOptions{LocalDev: true}); err != nil {
 			b.Fatalf("initial enable: %v", err)
 		}
 		b.StartTimer()
@@ -61,7 +61,7 @@ func BenchmarkEnableCommand(b *testing.B) {
 			b.StartTimer()
 
 			w.Reset()
-			if err := setupAgentHooksNonInteractive(w, ag, true, false, false, false); err != nil {
+			if err := setupAgentHooksNonInteractive(w, ag, EnableOptions{LocalDev: true}); err != nil {
 				b.Fatalf("setupAgentHooksNonInteractive: %v", err)
 			}
 		}
