@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
@@ -370,5 +371,86 @@ func TestReconcileDisconnected_MultipleLocalCheckpoints(t *testing.T) {
 	if cp1.ParentHashes[0] != remoteRef.Hash() {
 		t.Errorf("first cherry-picked commit parent = %s, want remote tip %s",
 			cp1.ParentHashes[0], remoteRef.Hash())
+	}
+}
+
+func TestReconcileDisconnected_ModifiedEntries(t *testing.T) {
+	t.Parallel()
+
+	bareDir := initBareWithMetadataBranch(t)
+	cloneDir, run := cloneWithConfig(t, bareDir)
+
+	// Create a disconnected local branch where commit 2 modifies a file from commit 1
+	// (simulates multi-session condensation updating metadata.json)
+	run("checkout", "--orphan", "temp-orphan")
+	run("rm", "-rf", ".")
+
+	// Commit 1: initial checkpoint
+	dir1 := filepath.Join(cloneDir, "aa", "aaaaaaaaaa")
+	if err := os.MkdirAll(dir1, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir1, "metadata.json"),
+		[]byte(`{"checkpoint_id":"aaaaaaaaaaaa","session_count":1}`), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "Checkpoint: aaaaaaaaaaaa")
+
+	// Commit 2: update same checkpoint (session_count 1→2) + add new file
+	if err := os.WriteFile(filepath.Join(dir1, "metadata.json"),
+		[]byte(`{"checkpoint_id":"aaaaaaaaaaaa","session_count":2}`), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir1, "1", "metadata.json"),
+		[]byte(`{"session_id":"second-session"}`), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir1, "1"), 0o755); err != nil {
+			t.Fatalf("failed to create dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir1, "1", "metadata.json"),
+			[]byte(`{"session_id":"second-session"}`), 0o644); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+	}
+	run("add", ".")
+	run("commit", "-m", "Checkpoint: aaaaaaaaaaaa (update)")
+
+	run("branch", "-f", paths.MetadataBranchName, "temp-orphan")
+	run("checkout", "main")
+
+	repo, err := git.PlainOpenWithOptions(cloneDir, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
+	}
+
+	if err := ReconcileDisconnectedMetadataBranch(repo); err != nil {
+		t.Fatalf("ReconcileDisconnectedMetadataBranch() failed: %v", err)
+	}
+
+	// Verify the MODIFIED metadata.json has session_count:2, not the original 1
+	refName := plumbing.NewBranchReferenceName(paths.MetadataBranchName)
+	newRef, err := repo.Reference(refName, true)
+	if err != nil {
+		t.Fatalf("local ref not found: %v", err)
+	}
+	tipCommit, err := repo.CommitObject(newRef.Hash())
+	if err != nil {
+		t.Fatalf("failed to get tip: %v", err)
+	}
+	tree, err := tipCommit.Tree()
+	if err != nil {
+		t.Fatalf("failed to get tree: %v", err)
+	}
+
+	metadataFile, err := tree.File("aa/aaaaaaaaaa/metadata.json")
+	if err != nil {
+		t.Fatalf("metadata.json not found in tree: %v", err)
+	}
+	content, err := metadataFile.Contents()
+	if err != nil {
+		t.Fatalf("failed to read metadata.json: %v", err)
+	}
+	if !strings.Contains(content, `"session_count":2`) {
+		t.Errorf("metadata.json should have session_count:2 (modified value), got: %s", content)
 	}
 }

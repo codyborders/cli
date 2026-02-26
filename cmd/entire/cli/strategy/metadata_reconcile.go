@@ -166,9 +166,9 @@ func collectCommitChain(repo *git.Repository, tip plumbing.Hash) ([]*object.Comm
 	return chain, nil
 }
 
-// cherryPickOnto applies each commit's new entries onto base, building a linear chain.
-// For each commit, it computes the diff from its parent (new entries), then applies
-// those entries onto the current tip's tree.
+// cherryPickOnto applies each commit's delta onto base, building a linear chain.
+// For each commit, it computes the full diff from its parent (additions, modifications,
+// and deletions), then applies that delta onto the current tip's tree.
 func cherryPickOnto(repo *git.Repository, base plumbing.Hash, commits []*object.Commit) (plumbing.Hash, error) {
 	currentTip := base
 
@@ -196,19 +196,26 @@ func cherryPickOnto(repo *git.Repository, base plumbing.Hash, commits []*object.
 			}
 		}
 
-		// Compute new entries: in commit but not in parent
-		newEntries := make(map[string]object.TreeEntry)
+		// Compute full delta: additions, modifications, and deletions
+		added := make(map[string]object.TreeEntry)
 		for path, entry := range commitEntries {
-			if _, exists := parentEntries[path]; !exists {
-				newEntries[path] = entry
+			parentEntry, exists := parentEntries[path]
+			if !exists || parentEntry.Hash != entry.Hash {
+				added[path] = entry // New or modified
+			}
+		}
+		var deleted []string
+		for path := range parentEntries {
+			if _, exists := commitEntries[path]; !exists {
+				deleted = append(deleted, path) // Removed in this commit
 			}
 		}
 
-		if len(newEntries) == 0 {
-			continue // Skip commits that add nothing new
+		if len(added) == 0 && len(deleted) == 0 {
+			continue // Skip no-op commits
 		}
 
-		// Get current tip's tree and merge new entries in
+		// Get current tip's tree and apply delta
 		tipCommit, err := repo.CommitObject(currentTip)
 		if err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("failed to get tip commit: %w", err)
@@ -222,8 +229,11 @@ func cherryPickOnto(repo *git.Repository, base plumbing.Hash, commits []*object.
 		if err := checkpoint.FlattenTree(repo, tipTree, "", mergedEntries); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("failed to flatten tip tree: %w", err)
 		}
-		for path, entry := range newEntries {
+		for path, entry := range added {
 			mergedEntries[path] = entry
+		}
+		for _, path := range deleted {
+			delete(mergedEntries, path)
 		}
 
 		mergedTreeHash, err := checkpoint.BuildTreeFromEntries(repo, mergedEntries)
