@@ -267,12 +267,17 @@ func TestRunResume_UncommittedChanges(t *testing.T) {
 	}
 }
 
-// createCheckpointOnMetadataBranch creates a checkpoint on the entire/checkpoints/v1 branch.
-// Returns the checkpoint ID.
+// createCheckpointOnMetadataBranch creates a checkpoint on the entire/checkpoints/v1 branch
+// with a default checkpoint ID ("abc123def456"). Returns the checkpoint ID.
 func createCheckpointOnMetadataBranch(t *testing.T, repo *git.Repository, sessionID string) id.CheckpointID {
 	t.Helper()
+	return createCheckpointOnMetadataBranchWithID(t, repo, sessionID, id.MustCheckpointID("abc123def456"))
+}
 
-	checkpointID := id.MustCheckpointID("abc123def456") // Fixed ID for testing
+// createCheckpointOnMetadataBranchWithID creates a checkpoint on the entire/checkpoints/v1 branch
+// with a caller-specified checkpoint ID. Returns the checkpoint ID.
+func createCheckpointOnMetadataBranchWithID(t *testing.T, repo *git.Repository, sessionID string, checkpointID id.CheckpointID) id.CheckpointID {
+	t.Helper()
 
 	// Get existing metadata branch or create it
 	if err := strategy.EnsureMetadataBranch(repo); err != nil {
@@ -480,6 +485,56 @@ func TestFindCheckpointInHistory_MultipleCheckpoints(t *testing.T) {
 	}
 	if result.newerCommitsExist {
 		t.Error("newerCommitsExist should be false when HEAD has the checkpoints")
+	}
+}
+
+func TestFindBranchCheckpoint_SquashMergeMultipleCheckpoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	repo, w, _ := setupResumeTestRepo(t, tmpDir, false)
+
+	// Create two checkpoints on metadata branch with different session IDs
+	sessionID1 := "2025-01-01-session-one"
+	cpID1 := createCheckpointOnMetadataBranch(t, repo, sessionID1)
+
+	sessionID2 := "2025-01-01-session-two"
+	cpID2 := createCheckpointOnMetadataBranchWithID(t, repo, sessionID2, id.MustCheckpointID("def456abc123"))
+
+	// Create a squash merge commit with both checkpoint trailers
+	testFile := filepath.Join(tmpDir, "squash.txt")
+	if err := os.WriteFile(testFile, []byte("squash content"), 0o644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if _, err := w.Add("squash.txt"); err != nil {
+		t.Fatalf("Failed to add file: %v", err)
+	}
+
+	squashMsg := fmt.Sprintf("Squash merge (#1)\n* first feature\n\nEntire-Checkpoint: %s\n\n* second feature\n\nEntire-Checkpoint: %s\n",
+		cpID1.String(), cpID2.String())
+	_, err := w.Commit(squashMsg, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Test User",
+			Email: "test@example.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create squash commit: %v", err)
+	}
+
+	// Verify findBranchCheckpoint returns both checkpoint IDs
+	result, err := findBranchCheckpoint(repo, "master")
+	if err != nil {
+		t.Fatalf("findBranchCheckpoint() error = %v", err)
+	}
+	if len(result.checkpointIDs) != 2 {
+		t.Fatalf("findBranchCheckpoint() returned %d checkpoint IDs, want 2", len(result.checkpointIDs))
+	}
+	if result.checkpointIDs[0].String() != cpID1.String() {
+		t.Errorf("checkpointIDs[0] = %q, want %q", result.checkpointIDs[0].String(), cpID1.String())
+	}
+	if result.checkpointIDs[1].String() != cpID2.String() {
+		t.Errorf("checkpointIDs[1] = %q, want %q", result.checkpointIDs[1].String(), cpID2.String())
 	}
 }
 

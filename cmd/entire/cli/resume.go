@@ -153,6 +153,12 @@ func resumeFromCurrentBranch(ctx context.Context, branchName string, force bool)
 		}
 	}
 
+	// Multiple checkpoints (squash merge): restore all sessions
+	if len(result.checkpointIDs) > 1 {
+		return resumeMultipleCheckpoints(ctx, repo, result.checkpointIDs, force)
+	}
+
+	// Single checkpoint: existing behavior (unchanged)
 	checkpointID := result.checkpointIDs[0]
 
 	// Get metadata branch tree for lookups
@@ -170,6 +176,150 @@ func resumeFromCurrentBranch(ctx context.Context, branchName string, force bool)
 	}
 
 	return resumeSession(ctx, metadata.SessionID, checkpointID, force)
+}
+
+// resumeMultipleCheckpoints restores sessions from multiple checkpoint IDs.
+// This handles squash merge commits where multiple Entire-Checkpoint trailers
+// are present in a single commit message. Each checkpoint is looked up independently
+// and missing metadata is skipped (best-effort).
+func resumeMultipleCheckpoints(ctx context.Context, repo *git.Repository, checkpointIDs []id.CheckpointID, force bool) error {
+	logCtx := logging.WithComponent(ctx, "resume")
+
+	// Get metadata branch tree (try local first, then remote)
+	metadataTree, err := strategy.GetMetadataBranchTree(repo)
+	if err != nil {
+		// Try fetching from remote
+		logging.Debug(logCtx, "metadata branch not available locally, trying remote")
+		if fetchErr := FetchMetadataBranch(ctx); fetchErr != nil {
+			// If fetch also fails, try remote tree directly
+			remoteTree, remoteErr := strategy.GetRemoteMetadataBranchTree(repo)
+			if remoteErr != nil {
+				fmt.Fprintf(os.Stderr, "Checkpoint metadata not available locally or on remote\n")
+				return nil //nolint:nilerr // Informational message, not a fatal error
+			}
+			metadataTree = remoteTree
+		} else {
+			metadataTree, err = strategy.GetMetadataBranchTree(repo)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Checkpoint metadata not available after fetch\n")
+				return nil //nolint:nilerr // Informational message, not a fatal error
+			}
+		}
+	}
+
+	strat := GetStrategy(ctx)
+	repoRoot, err := paths.WorktreeRoot(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get worktree root: %w", err)
+	}
+
+	var allSessions []strategy.RestoredSession
+
+	for _, cpID := range checkpointIDs {
+		metadata, metaErr := strategy.ReadCheckpointMetadata(metadataTree, cpID.Path())
+		if metaErr != nil {
+			logging.Debug(logCtx, "skipping checkpoint without metadata",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", metaErr.Error()),
+			)
+			continue
+		}
+
+		ag, agErr := strategy.ResolveAgentForRewind(metadata.Agent)
+		if agErr != nil {
+			logging.Debug(logCtx, "skipping checkpoint with unknown agent",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", agErr.Error()),
+			)
+			continue
+		}
+
+		sessionDir, dirErr := ag.GetSessionDir(repoRoot)
+		if dirErr != nil {
+			logging.Debug(logCtx, "skipping checkpoint: cannot determine session dir",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", dirErr.Error()),
+			)
+			continue
+		}
+		if mkErr := os.MkdirAll(sessionDir, 0o700); mkErr != nil {
+			logging.Debug(logCtx, "skipping checkpoint: cannot create session dir",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", mkErr.Error()),
+			)
+			continue
+		}
+
+		point := strategy.RewindPoint{
+			IsLogsOnly:   true,
+			CheckpointID: cpID,
+			Agent:        metadata.Agent,
+		}
+
+		sessions, restoreErr := strat.RestoreLogsOnly(ctx, point, force)
+		if restoreErr != nil || len(sessions) == 0 {
+			logging.Debug(logCtx, "skipping checkpoint: restore failed",
+				slog.String("checkpoint_id", cpID.String()),
+			)
+			continue
+		}
+
+		allSessions = append(allSessions, sessions...)
+	}
+
+	if len(allSessions) == 0 {
+		fmt.Fprintf(os.Stderr, "No session metadata found for checkpoints in this commit\n")
+		return nil
+	}
+
+	// Sort by CreatedAt (same as resumeSession)
+	sort.Slice(allSessions, func(i, j int) bool {
+		return allSessions[i].CreatedAt.Before(allSessions[j].CreatedAt)
+	})
+
+	logging.Debug(logCtx, "resume multiple checkpoints completed",
+		slog.Int("checkpoint_count", len(checkpointIDs)),
+		slog.Int("session_count", len(allSessions)),
+	)
+
+	// Display resume commands (same format as resumeSession)
+	if len(allSessions) > 1 {
+		fmt.Fprintf(os.Stderr, "\nRestored %d sessions. To continue, run:\n", len(allSessions))
+	} else {
+		fmt.Fprintf(os.Stderr, "Session: %s\n", allSessions[0].SessionID)
+		fmt.Fprintf(os.Stderr, "\nTo continue this session, run:\n")
+	}
+	for i, sess := range allSessions {
+		sessionAgent, agErr := strategy.ResolveAgentForRewind(sess.Agent)
+		if agErr != nil {
+			return fmt.Errorf("failed to resolve agent for session %s: %w", sess.SessionID, agErr)
+		}
+		cmd := sessionAgent.FormatResumeCommand(sess.SessionID)
+
+		if len(allSessions) > 1 {
+			if i == len(allSessions)-1 {
+				if sess.Prompt != "" {
+					fmt.Fprintf(os.Stderr, "  %s  # %s (most recent)\n", cmd, sess.Prompt)
+				} else {
+					fmt.Fprintf(os.Stderr, "  %s  # (most recent)\n", cmd)
+				}
+			} else {
+				if sess.Prompt != "" {
+					fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
+				} else {
+					fmt.Fprintf(os.Stderr, "  %s\n", cmd)
+				}
+			}
+		} else {
+			if sess.Prompt != "" {
+				fmt.Fprintf(os.Stderr, "  %s  # %s\n", cmd, sess.Prompt)
+			} else {
+				fmt.Fprintf(os.Stderr, "  %s\n", cmd)
+			}
+		}
+	}
+
+	return nil
 }
 
 // branchCheckpointResult contains the result of searching for a checkpoint on a branch.
