@@ -336,13 +336,14 @@ func EnsureMetadataBranch(repo *git.Repository) error {
 					return fmt.Errorf("failed to update metadata branch from remote: %w", setErr)
 				}
 				fmt.Fprintf(os.Stderr, "✓ Updated local branch '%s' from origin\n", paths.MetadataBranchName)
+			} else {
+				// Local has real data and differs from remote — reconciliation
+				// is handled by EnsureMetadataReconciled at read/write time
+				logging.Debug(context.Background(), "metadata branch differs from remote, reconciliation deferred to read/write time",
+					"local_hash", localRef.Hash().String()[:7],
+					"remote_hash", remoteRef.Hash().String()[:7],
+				)
 			}
-			// Local has real data and differs from remote — reconciliation
-			// is handled by EnsureMetadataReconciled at read/write time
-			logging.Debug(context.Background(), "metadata branch differs from remote, reconciliation deferred to read/write time",
-				"local_hash", localRef.Hash().String()[:7],
-				"remote_hash", remoteRef.Hash().String()[:7],
-			)
 		}
 		return nil
 	}
