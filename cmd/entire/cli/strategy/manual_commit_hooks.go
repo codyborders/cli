@@ -1008,13 +1008,17 @@ func (s *ManualCommitStrategy) condenseAndUpdateState(
 		return false
 	}
 
-	// Link checkpoint to trail (best-effort)
-	appendCheckpointToTrail(repo, result.CheckpointID, head.Hash(), result.Prompts)
-
-	// Generate trail title/description from transcript (best-effort, first condensation only)
+	// Link checkpoint to trail and optionally generate title (best-effort)
 	branchName := GetCurrentBranchName(repo)
-	if branchName != "" && branchName != GetDefaultBranchName(repo) && len(result.Transcript) > 0 {
-		generateTrailTitleFromTranscript(repo, branchName, result.Transcript, result.FilesTouched, state.AgentType)
+	if branchName != "" && branchName != GetDefaultBranchName(repo) {
+		store := trail.NewStore(repo)
+		existing, findErr := store.FindByBranch(branchName)
+		if findErr == nil && existing != nil {
+			appendCheckpointToExistingTrail(store, existing.TrailID, result.CheckpointID, head.Hash(), result.Prompts)
+			if existing.Body == "" && len(result.Transcript) > 0 {
+				generateTrailTitleForTrail(store, existing.TrailID, result.Transcript, result.FilesTouched, state.AgentType)
+			}
+		}
 	}
 
 	// Track this shadow branch for cleanup
@@ -2233,24 +2237,17 @@ func (s *ManualCommitStrategy) carryForwardToNewShadowBranch(
 	)
 }
 
-// generateTrailTitleFromTranscript uses the agent's text generation capability
+// generateTrailTitleForTrail uses the agent's text generation capability
 // to generate a proper title and description for the trail. Best-effort: silently
-// returns on any error. Only generates once (skips if description already set).
-func generateTrailTitleFromTranscript(repo *git.Repository, branchName string, transcriptBytes []byte, filesTouched []string, agentType types.AgentType) {
+// returns on any error.
+func generateTrailTitleForTrail(store *trail.Store, trailID trail.ID, transcriptBytes []byte, filesTouched []string, agentType types.AgentType) {
 	if !settings.IsSummarizeEnabled(context.Background()) {
 		return
 	}
-	store := trail.NewStore(repo)
-	existing, err := store.FindByBranch(branchName)
-	if err != nil || existing == nil {
-		return
-	}
-	// Only generate once: skip if body already set
-	if existing.Body != "" {
-		return
-	}
 
-	logCtx := logging.WithComponent(context.Background(), "trail-title")
+	logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	logCtx = logging.WithComponent(logCtx, "trail-title")
 	result, err := summarize.GenerateTrailTitle(logCtx, transcriptBytes, filesTouched, agentType)
 	if err != nil {
 		logging.Debug(logCtx, "trail title generation skipped",
@@ -2259,7 +2256,7 @@ func generateTrailTitleFromTranscript(repo *git.Repository, branchName string, t
 	}
 
 	//nolint:errcheck,gosec // best-effort: trail title generation is non-critical
-	store.Update(existing.TrailID, func(m *trail.Metadata) {
+	store.Update(trailID, func(m *trail.Metadata) {
 		if result.Title != "" {
 			m.Title = result.Title
 		}
@@ -2269,31 +2266,16 @@ func generateTrailTitleFromTranscript(repo *git.Repository, branchName string, t
 	})
 }
 
-// appendCheckpointToTrail links a checkpoint to the trail for the current branch.
+// appendCheckpointToExistingTrail links a checkpoint to the given trail.
 // Best-effort: silently returns on any error (trails are non-critical metadata).
-func appendCheckpointToTrail(repo *git.Repository, cpID id.CheckpointID, commitSHA plumbing.Hash, prompts []string) {
-	branchName := GetCurrentBranchName(repo)
-	if branchName == "" {
-		return
-	}
-	defaultBranch := GetDefaultBranchName(repo)
-	if branchName == defaultBranch {
-		return
-	}
-
-	store := trail.NewStore(repo)
-	existing, err := store.FindByBranch(branchName)
-	if err != nil || existing == nil {
-		return
-	}
-
+func appendCheckpointToExistingTrail(store *trail.Store, trailID trail.ID, cpID id.CheckpointID, commitSHA plumbing.Hash, prompts []string) {
 	var summary string
 	if len(prompts) > 0 {
 		summary = truncateForSummary(prompts[len(prompts)-1], 200)
 	}
 
 	//nolint:errcheck,gosec // best-effort: trail checkpoint linking is non-critical
-	store.AddCheckpoint(existing.TrailID, trail.CheckpointRef{
+	store.AddCheckpoint(trailID, trail.CheckpointRef{
 		CheckpointID: cpID.String(),
 		CommitSHA:    commitSHA.String(),
 		CreatedAt:    time.Now().UTC(),
@@ -2301,16 +2283,9 @@ func appendCheckpointToTrail(repo *git.Repository, cpID id.CheckpointID, commitS
 	})
 }
 
-// truncateForSummary truncates a string to maxLen, adding "..." if truncated.
-// Takes the first line only to keep summaries concise.
+// truncateForSummary takes the first line of s and truncates to maxLen runes.
 func truncateForSummary(s string, maxLen int) string {
 	line, _, _ := strings.Cut(s, "\n")
 	line = strings.TrimSpace(line)
-	if len(line) <= maxLen {
-		return line
-	}
-	if maxLen <= 3 {
-		return line[:maxLen]
-	}
-	return line[:maxLen-3] + "..."
+	return stringutil.TruncateRunes(line, maxLen, "...")
 }

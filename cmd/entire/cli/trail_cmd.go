@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
+	"github.com/entireio/cli/cmd/entire/cli/stringutil"
 	"github.com/entireio/cli/cmd/entire/cli/trail"
 
 	"github.com/charmbracelet/huh"
@@ -165,10 +167,10 @@ func runTrailListAll(w io.Writer, statusFilter string, jsonOutput bool) error {
 	// Table output
 	fmt.Fprintf(w, "%-30s %-40s %-13s %-15s %s\n", "BRANCH", "TITLE", "STATUS", "AUTHOR", "UPDATED")
 	for _, t := range trails {
-		branch := truncate(t.Branch, 30)
-		title := truncate(t.Title, 40)
+		branch := stringutil.TruncateRunes(t.Branch, 30, "...")
+		title := stringutil.TruncateRunes(t.Title, 40, "...")
 		fmt.Fprintf(w, "%-30s %-40s %-13s %-15s %s\n",
-			branch, title, t.Status, truncate(t.Author, 15), timeAgo(t.UpdatedAt))
+			branch, title, t.Status, stringutil.TruncateRunes(t.Author, 15, "..."), timeAgo(t.UpdatedAt))
 	}
 
 	return nil
@@ -182,7 +184,7 @@ func newTrailCreateCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create a trail for the current or a new branch",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrailCreate(cmd.OutOrStdout(), cmd.ErrOrStderr(), title, body, base, branch, status, checkout)
+			return runTrailCreate(cmd, title, body, base, branch, status, checkout)
 		},
 	}
 
@@ -197,7 +199,10 @@ func newTrailCreateCmd() *cobra.Command {
 }
 
 //nolint:cyclop // sequential steps for creating a trail — splitting would obscure the flow
-func runTrailCreate(w, errW io.Writer, title, body, base, branch, statusStr string, checkout bool) error {
+func runTrailCreate(cmd *cobra.Command, title, body, base, branch, statusStr string, checkout bool) error {
+	w := cmd.OutOrStdout()
+	errW := cmd.ErrOrStderr()
+
 	repo, err := strategy.OpenRepository(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to open repository: %w", err)
@@ -212,7 +217,7 @@ func runTrailCreate(w, errW io.Writer, title, body, base, branch, statusStr stri
 	}
 
 	_, currentBranch, _ := IsOnDefaultBranch(context.Background()) //nolint:errcheck // best-effort detection
-	interactive := !hasFlag("title") && !hasFlag("branch")
+	interactive := !cmd.Flags().Changed("title") && !cmd.Flags().Changed("branch")
 
 	if interactive {
 		// Interactive flow: title → body → branch (derived) → status
@@ -222,7 +227,7 @@ func runTrailCreate(w, errW io.Writer, title, body, base, branch, statusStr stri
 	} else {
 		// Non-interactive: derive missing values from provided flags
 		if branch == "" {
-			if hasFlag("title") {
+			if cmd.Flags().Changed("title") {
 				branch = slugifyTitle(title)
 			} else {
 				branch = currentBranch
@@ -311,7 +316,7 @@ func runTrailCreate(w, errW io.Writer, title, body, base, branch, statusStr stri
 	// Checkout the branch if requested or prompted
 	if needsCreation && currentBranch != branch {
 		shouldCheckout := checkout
-		if !shouldCheckout && !hasFlag("checkout") {
+		if !shouldCheckout && !cmd.Flags().Changed("checkout") {
 			// Interactive: ask whether to checkout
 			form := NewAccessibleForm(
 				huh.NewGroup(
@@ -439,12 +444,12 @@ func runTrailUpdate(w io.Writer, statusStr, title, body, branch string, labelAdd
 			m.Body = body
 		}
 		for _, l := range labelAdd {
-			if !containsString(m.Labels, l) {
+			if !slices.Contains(m.Labels, l) {
 				m.Labels = append(m.Labels, l)
 			}
 		}
 		for _, l := range labelRemove {
-			m.Labels = removeString(m.Labels, l)
+			m.Labels = slices.DeleteFunc(m.Labels, func(v string) bool { return v == l })
 		}
 	})
 	if err != nil {
@@ -458,27 +463,6 @@ func runTrailUpdate(w io.Writer, statusStr, title, body, branch string, labelAdd
 // defaultBaseBranch is the fallback base branch name when it cannot be determined.
 const defaultBaseBranch = "main"
 
-// hasFlag is a simple helper that checks os.Args for --flag presence.
-// Used to distinguish between "flag not provided" and "flag provided with empty value".
-func hasFlag(name string) bool {
-	for _, arg := range os.Args {
-		if arg == "--"+name || strings.HasPrefix(arg, "--"+name+"=") {
-			return true
-		}
-	}
-	return false
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}
-
 func formatValidStatuses() string {
 	statuses := trail.ValidStatuses()
 	names := make([]string, len(statuses))
@@ -486,25 +470,6 @@ func formatValidStatuses() string {
 		names[i] = string(s)
 	}
 	return strings.Join(names, ", ")
-}
-
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(slice []string, s string) []string {
-	var result []string
-	for _, v := range slice {
-		if v != s {
-			result = append(result, v)
-		}
-	}
-	return result
 }
 
 // runTrailCreateInteractive runs the interactive form for trail creation.
