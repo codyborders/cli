@@ -64,6 +64,7 @@ func handleLifecycleSessionStart(ctx context.Context, ag agent.Agent, event *age
 		slog.String("event", event.Type.String()),
 		slog.String("session_id", event.SessionID),
 		slog.String("session_ref", event.SessionRef),
+		slog.String("model", event.Model),
 	)
 
 	if event.SessionID == "" {
@@ -99,6 +100,7 @@ func handleLifecycleSessionStart(ctx context.Context, ag agent.Agent, event *age
 		logging.Warn(logCtx, "failed to load session state on start",
 			slog.String("error", loadErr.Error()))
 	} else if state != nil {
+		persistEventMetadataToState(event, state)
 		if transErr := strategy.TransitionAndLog(ctx, state, session.EventSessionStart, session.TransitionContext{}, session.NoOpActionHandler{}); transErr != nil {
 			logging.Warn(logCtx, "session start transition failed",
 				slog.String("error", transErr.Error()))
@@ -339,7 +341,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	totalChanges := len(relModifiedFiles) + len(relNewFiles) + len(relDeletedFiles)
 	if totalChanges == 0 {
 		logging.Info(logCtx, "no files modified during session, skipping checkpoint")
-		transitionSessionTurnEnd(ctx, sessionID, event.Model)
+		transitionSessionTurnEnd(ctx, sessionID, event)
 		if cleanupErr := CleanupPrePromptState(ctx, sessionID); cleanupErr != nil {
 			logging.Warn(logCtx, "failed to cleanup pre-prompt state",
 				slog.String("error", cleanupErr.Error()))
@@ -402,7 +404,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	}
 
 	// Transition session phase and cleanup
-	transitionSessionTurnEnd(ctx, sessionID, event.Model)
+	transitionSessionTurnEnd(ctx, sessionID, event)
 	if cleanupErr := CleanupPrePromptState(ctx, sessionID); cleanupErr != nil {
 		logging.Warn(logCtx, "failed to cleanup pre-prompt state",
 			slog.String("error", cleanupErr.Error()))
@@ -680,7 +682,7 @@ func parseTranscriptForCheckpointUUID(transcriptPath string) ([]transcriptLine, 
 }
 
 // transitionSessionTurnEnd transitions the session phase to IDLE and dispatches turn-end actions.
-func transitionSessionTurnEnd(ctx context.Context, sessionID string, model string) {
+func transitionSessionTurnEnd(ctx context.Context, sessionID string, event *agent.Event) {
 	logCtx := logging.WithComponent(ctx, "lifecycle")
 	turnState, loadErr := strategy.LoadSessionState(ctx, sessionID)
 	if loadErr != nil {
@@ -692,10 +694,7 @@ func transitionSessionTurnEnd(ctx context.Context, sessionID string, model strin
 		return
 	}
 
-	// Update ModelName if provided (model is known by turn-end even on first turn)
-	if model != "" {
-		turnState.ModelName = model
-	}
+	persistEventMetadataToState(event, turnState)
 
 	if err := strategy.TransitionAndLog(ctx, turnState, session.EventTurnEnd, session.TransitionContext{}, session.NoOpActionHandler{}); err != nil {
 		logging.Warn(logCtx, "turn-end transition failed",
@@ -747,4 +746,11 @@ func logFileChanges(ctx context.Context, modified, newFiles, deleted []string) {
 		slog.Int("modified", len(modified)),
 		slog.Int("new", len(newFiles)),
 		slog.Int("deleted", len(deleted)))
+}
+
+func persistEventMetadataToState(event *agent.Event, state *strategy.SessionState) {
+	// Update ModelName if provided (model is known by turn-end even on first turn)
+	if event.Model != "" {
+		state.ModelName = event.Model
+	}
 }
