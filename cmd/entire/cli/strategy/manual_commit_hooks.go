@@ -905,8 +905,15 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 
 	// Save FilesTouched BEFORE TransitionAndLog — the handler's condensation
 	// clears it, but we need the original list for carry-forward computation.
-	// resolveFilesTouched prefers hook-populated state, falls back to transcript extraction.
-	filesTouchedBefore := s.resolveFilesTouched(ctx, state)
+	// Only fall back to transcript extraction for ACTIVE sessions — IDLE/ENDED
+	// sessions have FilesTouched already populated by SaveStep/mergeFilesTouched.
+	var filesTouchedBefore []string
+	if state.Phase.IsActive() {
+		filesTouchedBefore = s.resolveFilesTouched(ctx, state)
+	} else if len(state.FilesTouched) > 0 {
+		filesTouchedBefore = make([]string, len(state.FilesTouched))
+		copy(filesTouchedBefore, state.FilesTouched)
+	}
 
 	logging.Debug(logCtx, "post-commit: carry-forward prep",
 		slog.String("session_id", state.SessionID),
@@ -1349,7 +1356,13 @@ func (s *ManualCommitStrategy) sessionHasNewContentFromLiveTranscript(ctx contex
 		return false, nil
 	}
 
-	modifiedFiles := s.resolveFilesTouched(ctx, state)
+	// Prefer hook-populated files. If empty, extract from transcript directly —
+	// hasNewTranscriptWork already called PrepareTranscript, so we bypass
+	// resolveFilesTouched (which would prepare again) and extract directly.
+	modifiedFiles := state.FilesTouched
+	if len(modifiedFiles) == 0 {
+		modifiedFiles = s.extractModifiedFilesFromLiveTranscript(ctx, state, state.CheckpointTranscriptStart)
+	}
 	if len(modifiedFiles) == 0 {
 		return false, nil
 	}
@@ -1378,12 +1391,18 @@ func (s *ManualCommitStrategy) sessionHasNewContentFromLiveTranscript(ctx contex
 // resolveFilesTouched returns the file list for a session.
 // Prefers hook-populated state.FilesTouched, falls back to transcript extraction.
 // All call sites that need "what files did the agent touch?" should use this.
+//
+// Handles PrepareTranscript internally before falling back to extraction,
+// so callers don't need to prepare the transcript first.
 func (s *ManualCommitStrategy) resolveFilesTouched(ctx context.Context, state *SessionState) []string {
 	if len(state.FilesTouched) > 0 {
 		result := make([]string, len(state.FilesTouched))
 		copy(result, state.FilesTouched)
 		return result
 	}
+
+	// Prepare transcript before extraction (e.g., OpenCode `opencode export`).
+	prepareTranscriptForState(ctx, state)
 
 	return s.extractModifiedFilesFromLiveTranscript(ctx, state, state.CheckpointTranscriptStart)
 }
@@ -1448,6 +1467,9 @@ func (s *ManualCommitStrategy) hasNewTranscriptWork(ctx context.Context, state *
 // extractModifiedFilesFromLiveTranscript extracts modified files from the live transcript
 // (including subagent transcripts) starting from the given offset, and normalizes them
 // to repo-relative paths. Returns the normalized file list.
+//
+// Callers must ensure the transcript is prepared (e.g., via prepareTranscriptForState
+// or hasNewTranscriptWork) before calling this function.
 func (s *ManualCommitStrategy) extractModifiedFilesFromLiveTranscript(ctx context.Context, state *SessionState, offset int) []string {
 	logCtx := logging.WithComponent(ctx, "checkpoint")
 
@@ -1458,22 +1480,6 @@ func (s *ManualCommitStrategy) extractModifiedFilesFromLiveTranscript(ctx contex
 	ag, err := agent.GetByAgentType(state.AgentType)
 	if err != nil {
 		return nil
-	}
-
-	// Ensure transcript file is up-to-date (OpenCode creates/refreshes it via `opencode export`).
-	// Only wait for flush when the session is active — for idle/ended sessions the
-	// transcript is already fully flushed (the Stop hook completed the flush).
-	if state.Phase.IsActive() {
-		if preparer, ok := ag.(agent.TranscriptPreparer); ok {
-			if prepErr := preparer.PrepareTranscript(ctx, state.TranscriptPath); prepErr != nil {
-				logging.Debug(logCtx, "prepare transcript failed",
-					slog.String("session_id", state.SessionID),
-					slog.String("agent_type", string(state.AgentType)),
-					slog.String("transcript_path", state.TranscriptPath),
-					slog.Any("error", prepErr),
-				)
-			}
-		}
 	}
 
 	analyzer, ok := ag.(agent.TranscriptAnalyzer)

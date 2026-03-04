@@ -1416,6 +1416,21 @@ func IsOnDefaultBranch(repo *git.Repository) (bool, string) {
 // the TranscriptPreparer interface. This ensures transcript files exist before
 // they are read (e.g., OpenCode creates its transcript lazily via `opencode export`).
 // Errors are silently ignored — this is best-effort for hook paths.
+// prepareTranscriptForState ensures the transcript is up-to-date for the given session.
+// Only prepares for ACTIVE sessions — IDLE/ENDED sessions are already flushed.
+// Resolves the agent from state.AgentType internally. Safe to call multiple times
+// (idempotent), but callers should avoid redundant calls for performance.
+func prepareTranscriptForState(ctx context.Context, state *SessionState) {
+	if !state.Phase.IsActive() || state.TranscriptPath == "" || state.AgentType == "" {
+		return
+	}
+	ag, err := agent.GetByAgentType(state.AgentType)
+	if err != nil {
+		return
+	}
+	prepareTranscriptIfNeeded(ctx, ag, state.TranscriptPath)
+}
+
 func prepareTranscriptIfNeeded(ctx context.Context, ag agent.Agent, transcriptPath string) {
 	if ag == nil || transcriptPath == "" {
 		return
