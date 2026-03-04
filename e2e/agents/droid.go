@@ -199,7 +199,12 @@ func (d *Droid) StartSession(ctx context.Context, dir string) (Session, error) {
 
 	// Droid auto-generates a greeting on startup which fires a Stop hook.
 	// Wait for the greeting turn to fully complete before accepting prompts.
-	time.Sleep(2 * time.Second)
+	select {
+	case <-ctx.Done():
+		_ = s.Close()
+		return nil, fmt.Errorf("context cancelled during startup wait: %w", ctx.Err())
+	case <-time.After(2 * time.Second):
+	}
 	s.stableAtSend = ""
 
 	return s, nil

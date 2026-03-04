@@ -163,7 +163,9 @@ func (s *TmuxSession) IsPaneDead() bool {
 	cmd := exec.Command("tmux", "display-message", "-t", s.name, "-p", "#{pane_dead}")
 	out, err := cmd.Output()
 	if err != nil {
-		return false
+		// If tmux itself fails (e.g. session/pane no longer exists),
+		// treat it as dead so WaitFor doesn't poll until timeout.
+		return true
 	}
 	return strings.TrimSpace(string(out)) == "1"
 }
