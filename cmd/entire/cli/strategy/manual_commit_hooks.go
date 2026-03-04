@@ -743,24 +743,30 @@ func (h *postCommitActionHandler) HandleWarnStaleSession(_ *session.State) error
 func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:unparam // error return is part of the hook contract; callers check it
 	logCtx := logging.WithComponent(ctx, "checkpoint")
 
+	_, openRepoSpan := perf.Start(ctx, "open_repository_and_head")
 	repo, err := OpenRepository(ctx)
 	if err != nil {
+		openRepoSpan.End()
 		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	// Get HEAD commit to check for trailer
 	head, err := repo.Head()
 	if err != nil {
+		openRepoSpan.End()
 		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
+		openRepoSpan.End()
 		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	// Check if commit has checkpoint trailer (ParseCheckpoint validates format)
 	checkpointID, found := trailers.ParseCheckpoint(commit.Message)
+	openRepoSpan.End()
+
 	if !found {
 		// No trailer — user removed it or it was never added (mid-turn commit).
 		// Still update BaseCommit for active sessions so future commits can match.
@@ -768,13 +774,17 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 		return nil
 	}
 
+	_, findSessionsSpan := perf.Start(ctx, "find_sessions_for_worktree")
 	worktreePath, err := paths.WorktreeRoot(ctx)
 	if err != nil {
+		findSessionsSpan.End()
 		return nil //nolint:nilerr // Hook must be silent on failure
 	}
 
 	// Find all active sessions for this worktree
 	sessions, err := s.findSessionsForWorktree(ctx, worktreePath)
+	findSessionsSpan.End()
+
 	if err != nil || len(sessions) == 0 {
 		logging.Warn(logCtx, "post-commit: no active sessions despite trailer",
 			slog.String("strategy", "manual-commit"),
@@ -806,6 +816,7 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 	// These are immutable within this hook invocation and used by multiple
 	// per-session functions (filesChangedInCommit, filesOverlapWithContent,
 	// filesWithRemainingAgentChanges, calculateSessionAttributions).
+	_, resolveTreesSpan := perf.Start(ctx, "resolve_commit_trees")
 	var headTree *object.Tree
 	if t, err := commit.Tree(); err == nil {
 		headTree = t
@@ -820,7 +831,9 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 	}
 
 	committedFileSet := filesChangedInCommit(commit, headTree, parentTree)
+	resolveTreesSpan.End()
 
+	_, processSessionsSpan := perf.Start(ctx, "process_sessions")
 	for _, state := range sessions {
 		// Skip fully-condensed ended sessions — no work remains.
 		// These sessions only persist for LastCheckpointID (amend trailer reuse).
@@ -831,9 +844,11 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 			head, commit, newHead, headTree, parentTree, committedFileSet,
 			shadowBranchesToDelete, uncondensedActiveOnBranch)
 	}
+	processSessionsSpan.End()
 
 	// Clean up shadow branches — only delete when ALL sessions on the branch are non-active
 	// or were condensed during this PostCommit.
+	_, cleanupBranchesSpan := perf.Start(ctx, "cleanup_shadow_branches")
 	for shadowBranchName := range shadowBranchesToDelete {
 		if uncondensedActiveOnBranch[shadowBranchName] {
 			logging.Debug(logCtx, "post-commit: preserving shadow branch (active session exists)",
@@ -852,6 +867,7 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 			)
 		}
 	}
+	cleanupBranchesSpan.End()
 
 	return nil
 }
@@ -879,6 +895,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	// Pre-resolve shadow branch ref and tree for this session.
 	// These are read 4+ times across sessionHasNewContent, filesOverlapWithContent,
 	// CondenseSession, filesWithRemainingAgentChanges, and calculateSessionAttributions.
+	_, resolveShadowBranchSpan := perf.Start(ctx, "resolve_shadow_branch")
 	var shadowRef *plumbing.Reference
 	var shadowTree *object.Tree
 	if ref, refErr := repo.Reference(plumbing.NewBranchReferenceName(shadowBranchName), true); refErr == nil {
@@ -889,6 +906,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 			}
 		}
 	}
+	resolveShadowBranchSpan.End()
 
 	// Check for new content (needed for TransitionContext and condensation).
 	// Fail-open: if content check errors, assume new content exists so we
@@ -902,6 +920,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	// In both cases, PrepareCommitMsg already validated this commit. We trust
 	// that decision here. Transcript-based re-validation is unreliable because
 	// subagent transcripts may not be available yet (subagent still running).
+	_, checkContentSpan := perf.Start(ctx, "check_session_content")
 	var hasNew bool
 	if state.Phase.IsActive() {
 		hasNew = true
@@ -927,6 +946,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	if len(filesTouchedBefore) == 0 && state.Phase.IsActive() && state.TranscriptPath != "" {
 		filesTouchedBefore = s.extractFilesFromLiveTranscript(ctx, state)
 	}
+	checkContentSpan.End()
 
 	logging.Debug(logCtx, "post-commit: carry-forward prep",
 		slog.String("session_id", state.SessionID),
@@ -937,6 +957,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	)
 
 	// Run the state machine transition with handler for strategy-specific actions.
+	_, transitionAndCondenseSpan := perf.Start(ctx, "transition_and_condense")
 	handler := &postCommitActionHandler{
 		s:                      s,
 		ctx:                    ctx,
@@ -960,6 +981,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 		logging.Warn(logCtx, "post-commit action handler error",
 			slog.String("error", err.Error()))
 	}
+	transitionAndCondenseSpan.End()
 
 	// Record checkpoint ID for ACTIVE sessions so HandleTurnEnd can finalize
 	// with full transcript. IDLE/ENDED sessions already have complete transcripts.
@@ -975,6 +997,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	// commit across two `git commit` invocations, each gets a 1:1 checkpoint.
 	// Uses content-aware comparison: if user did `git add -p` and committed
 	// partial changes, the file still has remaining agent changes to carry forward.
+	_, carryForwardSpan := perf.Start(ctx, "carry_forward_files")
 	if handler.condensed {
 		remainingFiles := filesWithRemainingAgentChanges(ctx, repo, shadowBranchName, commit, filesTouchedBefore, committedFileSet, overlapOpts{
 			headTree:   headTree,
@@ -993,6 +1016,7 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 			s.carryForwardToNewShadowBranch(ctx, repo, state, remainingFiles)
 		}
 	}
+	carryForwardSpan.End()
 
 	// Mark ENDED sessions as fully condensed when no carry-forward remains.
 	// PostCommit will skip these sessions entirely on future commits.
@@ -1002,11 +1026,13 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 	}
 
 	// Save the updated state
+	_, saveSessionStateSpan := perf.Start(ctx, "save_session_state")
 	if err := s.saveSessionState(ctx, state); err != nil {
 		logging.Warn(logCtx, "failed to update session state",
 			slog.String("session_id", state.SessionID),
 			slog.String("error", err.Error()))
 	}
+	saveSessionStateSpan.End()
 
 	// Only preserve shadow branch for active sessions that were NOT condensed.
 	// Condensed sessions already have their data on entire/checkpoints/v1.
