@@ -31,7 +31,7 @@ jobs:
   e2e-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    if: ${{ !inputs.agent || inputs.agent == matrix.agent }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !github.event.inputs.agent || github.event.inputs.agent == matrix.agent }}
     strategy:
       fail-fast: false
       matrix:
