@@ -15,12 +15,12 @@ import (
 )
 
 // getAllChangedFiles returns all files that changed between the attribution base
-// and HEAD. When commit hashes are provided, uses fast git diff-tree CLI; otherwise
-// falls back to go-git tree walk (used by CondenseSessionByID / doctor command).
-func getAllChangedFiles(ctx context.Context, baseTree, headTree *object.Tree, baseCommitHash, headCommitHash string) ([]string, error) {
+// and HEAD. When commit hashes and repoDir are provided, uses fast git diff-tree CLI;
+// otherwise falls back to go-git tree walk (used by CondenseSessionByID / doctor command).
+func getAllChangedFiles(ctx context.Context, baseTree, headTree *object.Tree, repoDir, baseCommitHash, headCommitHash string) ([]string, error) {
 	// Fast path: use git diff-tree when commit hashes are available
 	if baseCommitHash != "" && headCommitHash != "" {
-		return gitops.DiffTreeFileList(ctx, baseCommitHash, headCommitHash) //nolint:wrapcheck // Propagating gitops error
+		return gitops.DiffTreeFileList(ctx, repoDir, baseCommitHash, headCommitHash) //nolint:wrapcheck // Propagating gitops error
 	}
 
 	// Slow path: go-git tree walk (CondenseSessionByID fallback)
@@ -193,6 +193,7 @@ func CalculateAttributionWithAccumulated(
 	headTree *object.Tree,
 	filesTouched []string,
 	promptAttributions []PromptAttribution,
+	repoDir string,
 	attributionBaseCommit string,
 	headCommitHash string,
 ) *checkpoint.InitialAttribution {
@@ -243,7 +244,7 @@ func CalculateAttributionWithAccumulated(
 
 	// Calculate total user edits to non-agent files (files not in filesTouched)
 	// These files are not in the shadow tree, so base→head captures ALL their user edits
-	allChangedFiles, err := getAllChangedFiles(ctx, baseTree, headTree, attributionBaseCommit, headCommitHash)
+	allChangedFiles, err := getAllChangedFiles(ctx, baseTree, headTree, repoDir, attributionBaseCommit, headCommitHash)
 	if err != nil {
 		logging.Warn(logging.WithComponent(ctx, "attribution"),
 			"attribution: failed to enumerate changed files",

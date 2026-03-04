@@ -280,7 +280,7 @@ func TestCalculateAttributionWithAccumulated_BasicCase(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -339,7 +339,7 @@ func TestCalculateAttributionWithAccumulated_BugScenario(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -398,7 +398,7 @@ func TestCalculateAttributionWithAccumulated_DeletionOnly(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -449,7 +449,7 @@ func TestCalculateAttributionWithAccumulated_NoUserEdits(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -503,7 +503,7 @@ func TestCalculateAttributionWithAccumulated_NoAgentWork(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -559,7 +559,7 @@ func TestCalculateAttributionWithAccumulated_UserRemovesAllAgentLines(t *testing
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -630,7 +630,7 @@ func TestCalculateAttributionWithAccumulated_WithPromptAttributions(t *testing.T
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -675,7 +675,7 @@ func TestCalculateAttributionWithAccumulated_EmptyFilesTouched(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, []string{}, []PromptAttribution{}, "", "",
+		baseTree, shadowTree, headTree, []string{}, []PromptAttribution{}, "", "", "",
 	)
 
 	if result != nil {
@@ -729,7 +729,7 @@ func TestCalculateAttributionWithAccumulated_UserEditsNonAgentFile(t *testing.T)
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -1036,7 +1036,7 @@ func TestCalculateAttributionWithAccumulated_UserSelfModification(t *testing.T) 
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -1109,7 +1109,7 @@ func TestCalculateAttributionWithAccumulated_MixedModifications(t *testing.T) {
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {
@@ -1192,7 +1192,7 @@ func TestCalculateAttributionWithAccumulated_UncommittedWorktreeFiles(t *testing
 
 	result := CalculateAttributionWithAccumulated(
 		context.Background(),
-		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "",
+		baseTree, shadowTree, headTree, filesTouched, promptAttributions, "", "", "",
 	)
 
 	if result == nil {

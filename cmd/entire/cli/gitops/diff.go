@@ -10,9 +10,10 @@ import (
 
 // DiffTreeFiles returns the set of files changed between two commits using git diff-tree.
 // For initial commits (commit1 is empty), use --root mode.
+// repoDir is the path to the git repository working tree; the command runs in that directory.
 // Returns a map of file paths for O(1) lookup.
-func DiffTreeFiles(ctx context.Context, commit1, commit2 string) (map[string]struct{}, error) {
-	files, err := diffTreeRaw(ctx, commit1, commit2)
+func DiffTreeFiles(ctx context.Context, repoDir, commit1, commit2 string) (map[string]struct{}, error) {
+	files, err := diffTreeRaw(ctx, repoDir, commit1, commit2)
 	if err != nil {
 		return nil, err
 	}
@@ -26,12 +27,13 @@ func DiffTreeFiles(ctx context.Context, commit1, commit2 string) (map[string]str
 
 // DiffTreeFileList returns the list of files changed between two commits using git diff-tree.
 // For initial commits (commit1 is empty), use --root mode.
-func DiffTreeFileList(ctx context.Context, commit1, commit2 string) ([]string, error) {
-	return diffTreeRaw(ctx, commit1, commit2)
+// repoDir is the path to the git repository working tree; the command runs in that directory.
+func DiffTreeFileList(ctx context.Context, repoDir, commit1, commit2 string) ([]string, error) {
+	return diffTreeRaw(ctx, repoDir, commit1, commit2)
 }
 
-// diffTreeRaw runs git diff-tree and returns the list of changed file paths.
-func diffTreeRaw(ctx context.Context, commit1, commit2 string) ([]string, error) {
+// diffTreeRaw runs git diff-tree in the given directory and returns the list of changed file paths.
+func diffTreeRaw(ctx context.Context, dir, commit1, commit2 string) ([]string, error) {
 	var cmd *exec.Cmd
 	if commit1 == "" {
 		// Initial commit (no parent): list all files in the tree
@@ -39,6 +41,7 @@ func diffTreeRaw(ctx context.Context, commit1, commit2 string) ([]string, error)
 	} else {
 		cmd = exec.CommandContext(ctx, "git", "diff-tree", "--no-commit-id", "-r", "-z", commit1, commit2)
 	}
+	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

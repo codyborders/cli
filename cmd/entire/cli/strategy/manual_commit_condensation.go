@@ -110,6 +110,7 @@ func (s *ManualCommitStrategy) getCheckpointLog(ctx context.Context, checkpointI
 type condenseOpts struct {
 	shadowRef      *plumbing.Reference // Pre-resolved shadow branch ref (nil = resolve from repo)
 	headTree       *object.Tree        // Pre-resolved HEAD tree (passed through to calculateSessionAttributions)
+	repoDir        string              // Repository worktree path for git CLI commands
 	headCommitHash string              // HEAD commit hash (passed through for attribution)
 }
 
@@ -202,6 +203,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 
 	attribution := calculateSessionAttributions(ctx, repo, ref, sessionData, state, attributionOpts{
 		headTree:              o.headTree,
+		repoDir:               o.repoDir,
 		attributionBaseCommit: attrBase,
 		headCommitHash:        o.headCommitHash,
 	})
@@ -289,6 +291,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 type attributionOpts struct {
 	headTree              *object.Tree // HEAD commit tree (already resolved by PostCommit)
 	shadowTree            *object.Tree // Shadow branch tree (already resolved by PostCommit)
+	repoDir               string       // Repository worktree path for git CLI commands
 	attributionBaseCommit string       // Base commit hash for non-agent file detection (empty = fall back to go-git tree walk)
 	headCommitHash        string       // HEAD commit hash for non-agent file detection (empty = fall back to go-git tree walk)
 }
@@ -399,6 +402,7 @@ func calculateSessionAttributions(ctx context.Context, repo *git.Repository, sha
 		headTree,
 		sessionData.FilesTouched,
 		state.PromptAttributions,
+		o.repoDir,
 		o.attributionBaseCommit,
 		o.headCommitHash,
 	)

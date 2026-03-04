@@ -84,9 +84,8 @@ func gitCommit(t *testing.T, dir, msg string) {
 	}
 }
 
-// Tests that use os.Chdir cannot be parallelized (Go test framework restriction).
-
 func TestDiffTreeFiles_NormalCommit(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "file1.go", "package main\n")
@@ -100,9 +99,7 @@ func TestDiffTreeFiles_NormalCommit(t *testing.T) {
 	gitCommit(t, dir, "second")
 	commit2 := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), commit1, commit2)
+	result, err := DiffTreeFiles(context.Background(), dir, commit1, commit2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,6 +116,7 @@ func TestDiffTreeFiles_NormalCommit(t *testing.T) {
 }
 
 func TestDiffTreeFiles_InitialCommit(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "a.go", "package a\n")
@@ -127,9 +125,7 @@ func TestDiffTreeFiles_InitialCommit(t *testing.T) {
 	gitCommit(t, dir, "initial")
 	commit := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), "", commit)
+	result, err := DiffTreeFiles(context.Background(), dir, "", commit)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,6 +142,7 @@ func TestDiffTreeFiles_InitialCommit(t *testing.T) {
 }
 
 func TestDiffTreeFileList_MultiCommitRange(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "base.go", "package base\n")
@@ -163,9 +160,7 @@ func TestDiffTreeFileList_MultiCommitRange(t *testing.T) {
 	gitCommit(t, dir, "third")
 	commit3 := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	files, err := DiffTreeFileList(context.Background(), commit1, commit3)
+	files, err := DiffTreeFileList(context.Background(), dir, commit1, commit3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,6 +179,7 @@ func TestDiffTreeFileList_MultiCommitRange(t *testing.T) {
 }
 
 func TestDiffTreeFiles_DeletedFile(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "keep.go", "package keep\n")
@@ -200,9 +196,7 @@ func TestDiffTreeFiles_DeletedFile(t *testing.T) {
 	gitCommit(t, dir, "remove file")
 	commit2 := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), commit1, commit2)
+	result, err := DiffTreeFiles(context.Background(), dir, commit1, commit2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -216,6 +210,7 @@ func TestDiffTreeFiles_DeletedFile(t *testing.T) {
 }
 
 func TestDiffTreeFiles_NoChanges(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "file.go", "package main\n")
@@ -223,9 +218,7 @@ func TestDiffTreeFiles_NoChanges(t *testing.T) {
 	gitCommit(t, dir, "initial")
 	commit := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), commit, commit)
+	result, err := DiffTreeFiles(context.Background(), dir, commit, commit)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,6 +229,7 @@ func TestDiffTreeFiles_NoChanges(t *testing.T) {
 }
 
 func TestDiffTreeFiles_SubdirectoryFiles(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "root.go", "package root\n")
@@ -248,9 +242,7 @@ func TestDiffTreeFiles_SubdirectoryFiles(t *testing.T) {
 	gitCommit(t, dir, "add deep file")
 	commit2 := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), commit1, commit2)
+	result, err := DiffTreeFiles(context.Background(), dir, commit1, commit2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,6 +256,7 @@ func TestDiffTreeFiles_SubdirectoryFiles(t *testing.T) {
 }
 
 func TestDiffTreeFiles_Rename(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 
 	writeFile(t, dir, "original.go", "package original\n")
@@ -280,19 +273,26 @@ func TestDiffTreeFiles_Rename(t *testing.T) {
 	gitCommit(t, dir, "rename file")
 	commit2 := commitHash(t, dir)
 
-	t.Chdir(dir)
-
-	result, err := DiffTreeFiles(context.Background(), commit1, commit2)
+	result, err := DiffTreeFiles(context.Background(), dir, commit1, commit2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Both old and new names should appear
+	// Without -M flag, rename shows as D+A — both old and new names should appear
 	if _, ok := result["original.go"]; !ok {
 		t.Error("expected original.go in result")
 	}
 	if _, ok := result["renamed.go"]; !ok {
 		t.Error("expected renamed.go in result")
+	}
+}
+
+func TestDiffTreeFiles_InvalidDir(t *testing.T) {
+	t.Parallel()
+
+	_, err := DiffTreeFiles(context.Background(), t.TempDir(), "abc123", "def456")
+	if err == nil {
+		t.Error("expected error for non-git directory")
 	}
 }
 
@@ -334,6 +334,7 @@ func TestParseDiffTreeOutput(t *testing.T) {
 
 	t.Run("rename", func(t *testing.T) {
 		t.Parallel()
+		// R/C status only appears with -M/-C flags (defensive handling)
 		data := []byte(":100644 100644 abc1234 def5678 R100\x00old.go\x00new.go\x00")
 		result := parseDiffTreeOutput(data)
 		if len(result) != 2 {
@@ -373,4 +374,34 @@ func TestParseDiffTreeOutput(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestExtractStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected byte
+	}{
+		{"modify", ":100644 100644 abc1234 def5678 M", 'M'},
+		{"add", ":000000 100644 0000000 abc1234 A", 'A'},
+		{"delete", ":100644 000000 abc1234 0000000 D", 'D'},
+		{"rename with score", ":100644 100644 abc1234 def5678 R100", 'R'},
+		{"copy with score", ":100644 100644 abc1234 abc1234 C075", 'C'},
+		{"type change", ":100644 120000 abc1234 def5678 T", 'T'},
+		{"empty string", "", 0},
+		{"too few fields", ":100644 100644 abc1234", 0},
+		{"whitespace only", "   ", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractStatus(tt.input)
+			if got != tt.expected {
+				t.Errorf("extractStatus(%q) = %c (%d), want %c (%d)", tt.input, got, got, tt.expected, tt.expected)
+			}
+		})
+	}
 }

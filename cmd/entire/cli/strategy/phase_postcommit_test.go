@@ -878,7 +878,7 @@ func TestFilesChangedInCommit(t *testing.T) {
 	commit, err := repo.CommitObject(commitHash)
 	require.NoError(t, err)
 
-	changed := filesChangedInCommit(context.Background(), commit)
+	changed := filesChangedInCommit(context.Background(), dir, commit)
 	assert.Contains(t, changed, "file1.txt")
 	assert.Contains(t, changed, "file2.txt")
 	// test.txt was in the initial commit, not this one
@@ -915,7 +915,7 @@ func TestFilesChangedInCommit_InitialCommit(t *testing.T) {
 	commit, err := repo.CommitObject(commitHash)
 	require.NoError(t, err)
 
-	changed := filesChangedInCommit(context.Background(), commit)
+	changed := filesChangedInCommit(context.Background(), dir, commit)
 	assert.Contains(t, changed, "init.txt")
 	assert.Len(t, changed, 1)
 }
