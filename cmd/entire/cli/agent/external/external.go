@@ -208,7 +208,8 @@ func (e *Agent) HookNames() []string {
 }
 
 func (e *Agent) ParseHookEvent(ctx context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
-	data, err := io.ReadAll(stdin)
+	const maxParseHookBytes = 10 * 1024 * 1024 // 10 MB
+	data, err := io.ReadAll(io.LimitReader(stdin, maxParseHookBytes))
 	if err != nil {
 		return nil, fmt.Errorf("parse-hook: read stdin: %w", err)
 	}
