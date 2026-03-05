@@ -330,16 +330,18 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	_, openRepoSpan := perf.Start(ctx, "open_repository")
 	repo, err := OpenRepository(ctx)
 	if err != nil {
+		openRepoSpan.RecordError(err)
 		openRepoSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 	openRepoSpan.End()
 
 	_, findSessionsSpan := perf.Start(ctx, "find_sessions_for_worktree")
 	worktreePath, err := paths.WorktreeRoot(ctx)
 	if err != nil {
+		findSessionsSpan.RecordError(err)
 		findSessionsSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	// Find all active sessions for this worktree
@@ -347,13 +349,14 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	// intermediate commits without entering new prompts, causing HEAD to diverge
 	sessions, err := s.findSessionsForWorktree(ctx, worktreePath)
 	if err != nil || len(sessions) == 0 {
+		findSessionsSpan.RecordError(err)
 		findSessionsSpan.End()
 		// No active sessions or error listing - silently skip (hooks must be resilient)
 		logging.Debug(logCtx, "prepare-commit-msg: no active sessions",
 			slog.String("strategy", "manual-commit"),
 			slog.String("source", source),
 		)
-		return nil //nolint:nilerr // Intentional: hooks must be silent on failure
+		return nil
 	}
 	findSessionsSpan.End()
 
@@ -389,8 +392,9 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	_, readCommitMessageSpan := perf.Start(ctx, "read_commit_message")
 	content, err := os.ReadFile(commitMsgFile) //nolint:gosec // commitMsgFile is provided by git hook
 	if err != nil {
+		readCommitMessageSpan.RecordError(err)
 		readCommitMessageSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	message := string(content)
@@ -412,6 +416,7 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	_, resolveMetadataSpan := perf.Start(ctx, "resolve_session_metadata")
 	checkpointID, err := id.Generate()
 	if err != nil {
+		resolveMetadataSpan.RecordError(err)
 		resolveMetadataSpan.End()
 		return fmt.Errorf("failed to generate checkpoint ID: %w", err)
 	}
@@ -490,8 +495,9 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	// Write updated message back
 	_, writeCommitMessageSpan := perf.Start(ctx, "write_commit_message")
 	if err := os.WriteFile(commitMsgFile, []byte(message), 0o600); err != nil {
+		writeCommitMessageSpan.RecordError(err)
 		writeCommitMessageSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 	writeCommitMessageSpan.End()
 
@@ -746,21 +752,24 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 	_, openRepoSpan := perf.Start(ctx, "open_repository_and_head")
 	repo, err := OpenRepository(ctx)
 	if err != nil {
+		openRepoSpan.RecordError(err)
 		openRepoSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	// Get HEAD commit to check for trailer
 	head, err := repo.Head()
 	if err != nil {
+		openRepoSpan.RecordError(err)
 		openRepoSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
+		openRepoSpan.RecordError(err)
 		openRepoSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	// Check if commit has checkpoint trailer (ParseCheckpoint validates format)
@@ -777,8 +786,9 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 	_, findSessionsSpan := perf.Start(ctx, "find_sessions_for_worktree")
 	worktreePath, err := paths.WorktreeRoot(ctx)
 	if err != nil {
+		findSessionsSpan.RecordError(err)
 		findSessionsSpan.End()
-		return nil //nolint:nilerr // Hook must be silent on failure
+		return nil
 	}
 
 	// Find all active sessions for this worktree

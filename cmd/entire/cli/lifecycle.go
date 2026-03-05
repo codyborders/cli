@@ -95,6 +95,7 @@ func handleLifecycleSessionStart(ctx context.Context, ag agent.Agent, event *age
 	}
 	if writer, ok := ag.(agent.HookResponseWriter); ok {
 		if err := writer.WriteHookResponse(message); err != nil {
+			hookResponseSpan.RecordError(err)
 			hookResponseSpan.End()
 			return fmt.Errorf("failed to write hook response: %w", err)
 		}
@@ -142,6 +143,7 @@ func handleLifecycleTurnStart(ctx context.Context, ag agent.Agent, event *agent.
 	// Capture pre-prompt state (including transcript position via TranscriptAnalyzer)
 	_, captureSpan := perf.Start(ctx, "capture_pre_prompt_state")
 	if err := CapturePrePromptState(ctx, ag, sessionID, event.SessionRef); err != nil {
+		captureSpan.RecordError(err)
 		captureSpan.End()
 		return err
 	}
@@ -201,12 +203,14 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	}
 
 	if !fileExists(transcriptRef) {
+		prepareSpan.RecordError(fmt.Errorf("transcript file not found: %s", transcriptRef))
 		prepareSpan.End()
 		return fmt.Errorf("transcript file not found: %s", transcriptRef)
 	}
 
 	// Early check: bail out quickly if the repo has no commits yet.
 	if repo, err := strategy.OpenRepository(ctx); err == nil && strategy.IsEmptyRepository(repo) {
+		prepareSpan.RecordError(strategy.ErrEmptyRepository)
 		prepareSpan.End()
 		logging.Info(logCtx, "skipping checkpoint - will activate after first commit")
 		return NewSilentError(strategy.ErrEmptyRepository)
@@ -221,6 +225,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 		sessionDirAbs = sessionDir
 	}
 	if err := os.MkdirAll(sessionDirAbs, 0o750); err != nil {
+		copySpan.RecordError(err)
 		copySpan.End()
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
@@ -228,11 +233,13 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	// Copy transcript to session directory
 	transcriptData, err := ag.ReadTranscript(transcriptRef)
 	if err != nil {
+		copySpan.RecordError(err)
 		copySpan.End()
 		return fmt.Errorf("failed to read transcript: %w", err)
 	}
 	logFile := filepath.Join(sessionDirAbs, paths.TranscriptFileName)
 	if err := os.WriteFile(logFile, transcriptData, 0o600); err != nil {
+		copySpan.RecordError(err)
 		copySpan.End()
 		return fmt.Errorf("failed to write transcript: %w", err)
 	}
@@ -302,6 +309,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	promptFile := filepath.Join(sessionDirAbs, paths.PromptFileName)
 	promptContent := strings.Join(allPrompts, "\n\n---\n\n")
 	if err := os.WriteFile(promptFile, []byte(promptContent), 0o600); err != nil {
+		writeFilesSpan.RecordError(err)
 		writeFilesSpan.End()
 		return fmt.Errorf("failed to write prompt file: %w", err)
 	}
@@ -312,6 +320,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	// Write summary file
 	summaryFile := filepath.Join(sessionDirAbs, paths.SummaryFileName)
 	if err := os.WriteFile(summaryFile, []byte(summary), 0o600); err != nil {
+		writeFilesSpan.RecordError(err)
 		writeFilesSpan.End()
 		return fmt.Errorf("failed to write summary file: %w", err)
 	}
@@ -332,6 +341,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	_, detectSpan := perf.Start(ctx, "detect_file_changes")
 	repoRoot, err := paths.WorktreeRoot(ctx)
 	if err != nil {
+		detectSpan.RecordError(err)
 		detectSpan.End()
 		return fmt.Errorf("failed to get worktree root: %w", err)
 	}
@@ -392,6 +402,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	_, saveStepSpan := perf.Start(ctx, "build_and_save_step")
 	contextFile := filepath.Join(sessionDirAbs, paths.ContextFileName)
 	if err := createContextFile(contextFile, commitMessage, sessionID, allPrompts, summary); err != nil {
+		saveStepSpan.RecordError(err)
 		saveStepSpan.End()
 		return fmt.Errorf("failed to create context file: %w", err)
 	}
@@ -401,6 +412,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	// Get git author
 	author, err := GetGitAuthor(ctx)
 	if err != nil {
+		saveStepSpan.RecordError(err)
 		saveStepSpan.End()
 		return fmt.Errorf("failed to get git author: %w", err)
 	}
@@ -439,6 +451,7 @@ func handleLifecycleTurnEnd(ctx context.Context, ag agent.Agent, event *agent.Ev
 	}
 
 	if err := strat.SaveStep(ctx, stepCtx); err != nil {
+		saveStepSpan.RecordError(err)
 		saveStepSpan.End()
 		return fmt.Errorf("failed to save step: %w", err)
 	}

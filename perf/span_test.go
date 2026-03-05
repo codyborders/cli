@@ -2,6 +2,7 @@ package perf
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -156,5 +157,92 @@ func TestStart_MultipleChildren(t *testing.T) {
 	}
 	if parent.children[1].name != "child2" {
 		t.Errorf("second child name = %q, want %q", parent.children[1].name, "child2")
+	}
+}
+
+func TestRecordError_MarksSpanAsErrored(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	_, span := Start(ctx, "op")
+	testErr := errors.New("something failed")
+	span.RecordError(testErr)
+
+	if !errors.Is(span.err, testErr) {
+		t.Errorf("span.err = %v, want %v", span.err, testErr)
+	}
+
+	span.End()
+}
+
+func TestRecordError_NilIsNoOp(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	_, span := Start(ctx, "op")
+	span.RecordError(nil)
+
+	if span.err != nil {
+		t.Errorf("span.err = %v, want nil", span.err)
+	}
+
+	span.End()
+}
+
+func TestRecordError_FirstErrorWins(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	_, span := Start(ctx, "op")
+	firstErr := errors.New("first")
+	secondErr := errors.New("second")
+
+	span.RecordError(firstErr)
+	span.RecordError(secondErr)
+
+	if !errors.Is(span.err, firstErr) {
+		t.Errorf("span.err = %v, want %v (first error)", span.err, firstErr)
+	}
+
+	span.End()
+}
+
+func TestRecordError_ChildErrorFlagInOutput(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	ctx, parent := Start(ctx, "parent")
+	_, child := Start(ctx, "failing_step")
+
+	child.RecordError(errors.New("step failed"))
+	child.End()
+	parent.End()
+
+	// Verify the child has the error recorded
+	if child.err == nil {
+		t.Error("child span should have error recorded")
+	}
+	// The error flag will appear as "steps.failing_step_err: true" in log output.
+	// We verify the span state directly since log output goes to slog.
+	if parent.children[0].err == nil {
+		t.Error("parent's child should have error recorded")
+	}
+}
+
+func TestEnd_NoErrorFlagByDefault(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	ctx, parent := Start(ctx, "parent")
+	_, child := Start(ctx, "ok_step")
+
+	child.End()
+	parent.End()
+
+	if child.err != nil {
+		t.Errorf("child span should have nil error, got %v", child.err)
+	}
+	if parent.err != nil {
+		t.Errorf("parent span should have nil error, got %v", parent.err)
 	}
 }

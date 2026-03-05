@@ -20,6 +20,7 @@ type Span struct {
 	attrs    []slog.Attr
 	ctx      context.Context
 	ended    bool
+	err      error
 }
 
 // Start begins a new span. If ctx already has a span, the new one becomes a child.
@@ -39,6 +40,15 @@ func Start(ctx context.Context, name string, attrs ...slog.Attr) (context.Contex
 	return contextWithSpan(ctx, s), s
 }
 
+// RecordError marks the span as errored. Only the first non-nil error is stored;
+// subsequent calls are no-ops. Call this before End() on error paths.
+func (s *Span) RecordError(err error) {
+	if err == nil || s.err != nil {
+		return
+	}
+	s.err = err
+}
+
 // End completes the span. For root spans, emits a single DEBUG log line
 // with the full timing tree. For child spans, records the duration only.
 // Safe to call multiple times -- subsequent calls are no-ops.
@@ -54,15 +64,18 @@ func (s *Span) End() {
 		return
 	}
 
-	// Build log attributes: component, op, duration_ms, then child step durations.
+	// Build log attributes: component, op, duration_ms, error flag, then child step durations.
 	// The "component" key is intentionally set to "perf" for easy filtering,
 	// even if the context already has a component set via logging.WithComponent().
-	attrs := make([]any, 0, 3+len(s.children)+len(s.attrs))
+	attrs := make([]any, 0, 4+2*len(s.children)+len(s.attrs))
 	attrs = append(attrs, slog.String("component", "perf"))
 	attrs = append(attrs, slog.String("op", s.name))
 	attrs = append(attrs, slog.Int64("duration_ms", s.duration.Milliseconds()))
+	if s.err != nil {
+		attrs = append(attrs, slog.Bool("error", true))
+	}
 
-	// Add child step durations as flat keys
+	// Add child step durations (and error flags) as flat keys
 	for _, child := range s.children {
 		// Auto-end children that were not explicitly ended
 		if !child.ended {
@@ -71,6 +84,10 @@ func (s *Span) End() {
 		}
 		key := fmt.Sprintf("steps.%s_ms", child.name)
 		attrs = append(attrs, slog.Int64(key, child.duration.Milliseconds()))
+		if child.err != nil {
+			errKey := fmt.Sprintf("steps.%s_err", child.name)
+			attrs = append(attrs, slog.Bool(errKey, true))
+		}
 	}
 
 	// Add any extra attributes from Start()

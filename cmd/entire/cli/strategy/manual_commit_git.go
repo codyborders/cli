@@ -25,6 +25,7 @@ func (s *ManualCommitStrategy) SaveStep(ctx context.Context, step StepContext) e
 	_, openRepoSpan := perf.Start(ctx, "open_repository")
 	repo, err := OpenRepository(ctx)
 	if err != nil {
+		openRepoSpan.RecordError(err)
 		openRepoSpan.End()
 		return fmt.Errorf("failed to open git repository: %w", err)
 	}
@@ -37,6 +38,7 @@ func (s *ManualCommitStrategy) SaveStep(ctx context.Context, step StepContext) e
 	_, loadStateSpan := perf.Start(ctx, "load_session_state")
 	state, err := s.loadSessionState(ctx, sessionID)
 	if err != nil {
+		loadStateSpan.RecordError(err)
 		loadStateSpan.End()
 		return fmt.Errorf("failed to load session state: %w", err)
 	}
@@ -45,6 +47,7 @@ func (s *ManualCommitStrategy) SaveStep(ctx context.Context, step StepContext) e
 		agentType := resolveAgentType(step.AgentType, state)
 		state, err = s.initializeSession(ctx, repo, sessionID, agentType, "", "", "") // No transcript/prompt/model in fallback
 		if err != nil {
+			loadStateSpan.RecordError(err)
 			loadStateSpan.End()
 			return fmt.Errorf("failed to initialize session: %w", err)
 		}
@@ -54,6 +57,7 @@ func (s *ManualCommitStrategy) SaveStep(ctx context.Context, step StepContext) e
 	// Check if HEAD has changed (e.g., Claude did a rebase via tool call) and migrate if needed
 	_, migrateSpan := perf.Start(ctx, "migrate_shadow_branch")
 	if err := s.migrateAndPersistIfNeeded(ctx, repo, state); err != nil {
+		migrateSpan.RecordError(err)
 		migrateSpan.End()
 		return err
 	}
@@ -150,6 +154,7 @@ func (s *ManualCommitStrategy) SaveStep(ctx context.Context, step StepContext) e
 
 	// Save updated state
 	if err := s.saveSessionState(ctx, state); err != nil {
+		updateStateSpan.RecordError(err)
 		updateStateSpan.End()
 		return fmt.Errorf("failed to save session state: %w", err)
 	}
