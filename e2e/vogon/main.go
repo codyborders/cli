@@ -376,16 +376,21 @@ func extractTopic(prompt string) string {
 }
 
 func executeActions(dir string, actions []action) {
+	var pendingFiles []string
 	for _, a := range actions {
 		switch a.kind {
 		case "create":
 			createFile(dir, a.path, a.content)
+			pendingFiles = append(pendingFiles, a.path)
 		case "modify":
 			modifyFile(dir, a.path, a.content)
+			pendingFiles = append(pendingFiles, a.path)
 		case "delete":
 			deleteFile(dir, a.path)
+			pendingFiles = append(pendingFiles, a.path)
 		case "commit":
-			gitCommit(dir)
+			gitCommit(dir, pendingFiles)
+			pendingFiles = nil
 		}
 	}
 }
@@ -417,8 +422,12 @@ func deleteFile(dir, path string) {
 	}
 }
 
-func gitCommit(dir string) {
-	gitRun(dir, "add", ".")
+func gitCommit(dir string, files []string) {
+	if len(files) == 0 {
+		gitRun(dir, "add", ".")
+	} else {
+		gitRun(dir, append([]string{"add", "--"}, files...)...)
+	}
 	gitRun(dir, "commit", "-m", "Vogon agent commit")
 }
 
