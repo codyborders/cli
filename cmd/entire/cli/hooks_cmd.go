@@ -6,13 +6,18 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode" // register agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/cursor"     // register agent
-	"github.com/entireio/cli/cmd/entire/cli/agent/external"
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid" // register agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"      // register agent
-	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"       // register agent
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
+
+	// Import agents to ensure they are registered before we iterate
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/cursor"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/opencode"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/vogon"
+
+	// support external agents
+	"github.com/entireio/cli/cmd/entire/cli/agent/external"
 
 	"github.com/spf13/cobra"
 )
