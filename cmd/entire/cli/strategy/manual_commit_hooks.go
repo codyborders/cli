@@ -803,7 +803,7 @@ func (s *ManualCommitStrategy) PostCommit(ctx context.Context) error { //nolint:
 		}
 	}
 
-	committedFileSet := filesChangedInCommit(ctx, worktreePath, commit)
+	committedFileSet := filesChangedInCommit(ctx, worktreePath, commit, headTree, parentTree)
 
 	for _, state := range sessions {
 		// Skip fully-condensed ended sessions — no work remains.
@@ -2199,18 +2199,37 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 
 // filesChangedInCommit returns the set of files changed in a commit using git diff-tree.
 // Uses the git CLI for faster performance vs go-git tree walks (lower constant factors).
-func filesChangedInCommit(ctx context.Context, repoDir string, commit *object.Commit) map[string]struct{} {
+// Falls back to go-git tree walk if git diff-tree fails, since an empty result would
+// break downstream condensation and carry-forward logic.
+func filesChangedInCommit(ctx context.Context, repoDir string, commit *object.Commit, headTree, parentTree *object.Tree) map[string]struct{} {
 	var parentHash string
 	if commit.NumParents() > 0 {
 		parentHash = commit.ParentHashes[0].String()
 	}
 	result, err := gitops.DiffTreeFiles(ctx, repoDir, parentHash, commit.Hash.String())
 	if err != nil {
-		logging.Warn(ctx, "post-commit: git diff-tree failed; condensation and carry-forward may be affected",
+		logging.Warn(ctx, "post-commit: git diff-tree failed, falling back to tree walk",
 			slog.String("commit", commit.Hash.String()),
 			slog.String("error", err.Error()),
 		)
+		return filesChangedInCommitFallback(ctx, headTree, parentTree)
+	}
+	return result
+}
+
+// filesChangedInCommitFallback uses go-git tree walks to compute changed files.
+// Slower than git diff-tree but doesn't depend on an external process.
+func filesChangedInCommitFallback(ctx context.Context, headTree, parentTree *object.Tree) map[string]struct{} {
+	files, err := getAllChangedFilesBetweenTreesSlow(ctx, parentTree, headTree)
+	if err != nil {
+		logging.Warn(ctx, "post-commit: tree walk fallback also failed; condensation and carry-forward may be affected",
+			slog.String("error", err.Error()),
+		)
 		return make(map[string]struct{})
+	}
+	result := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		result[f] = struct{}{}
 	}
 	return result
 }
