@@ -31,8 +31,8 @@ jobs:
       - name: Extract release notes from CHANGELOG.md
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v ver="$VERSION" 'BEGIN{header="^## \\[" ver "\\]"} $0 ~ header{found=1; next} /^## \[/{if(found) exit} found{print}' CHANGELOG.md > release_notes.md
-          if [ ! -s release_notes.md ]; then
+          awk -v ver="$VERSION" 'BEGIN{header="^## \\[" ver "\\]"} $0 ~ header{found=1; next} /^## \[/{if(found) exit} found{print}' CHANGELOG.md > "$RUNNER_TEMP/release_notes.md"
+          if [ ! -s "$RUNNER_TEMP/release_notes.md" ]; then
             echo "::error::No changelog entry found for version ${VERSION} in CHANGELOG.md"
             exit 1
           fi
@@ -42,7 +42,7 @@ jobs:
         with:
           distribution: goreleaser-pro
           version: latest
-          args: release --clean --release-notes=release_notes.md
+          args: release --clean --release-notes=${{ runner.temp }}/release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAP_GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
