@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -69,26 +68,6 @@ func (a *CursorCLI) Bootstrap() error {
 		return errors.New("CURSOR_API_KEY must be set on CI for cursor-cli E2E tests")
 	}
 	return nil
-}
-
-// cursorConfigDir creates an isolated per-session config directory for the
-// Cursor CLI. Each session gets its own XDG_CONFIG_HOME so that parallel tests
-// don't race on the shared ~/.config/cursor/cli-config.json file.
-// The directory is pre-seeded with an empty cli-config.json to avoid the
-// atomic temp-file rename that triggers the ENOENT race.
-func cursorConfigDir() (string, error) {
-	tmp, err := os.MkdirTemp("", "cursor-e2e-config-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp config dir: %w", err)
-	}
-	cursorDir := filepath.Join(tmp, "cursor")
-	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir cursor config: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(cursorDir, "cli-config.json"), []byte("{}"), 0o644); err != nil {
-		return "", fmt.Errorf("seed cli-config.json: %w", err)
-	}
-	return tmp, nil
 }
 
 func (a *CursorCLI) RunPrompt(ctx context.Context, dir string, prompt string, opts ...Option) (Output, error) {
@@ -174,39 +153,21 @@ func (a *CursorCLI) startInteractiveSession(dir string) (*TmuxSession, error) {
 		return nil, fmt.Errorf("agent binary not found: %w", err)
 	}
 
-	// Create an isolated config directory for this session so parallel tests
-	// don't race on the shared ~/.config/cursor/cli-config.json file.
-	configDir, err := cursorConfigDir()
-	if err != nil {
-		return nil, fmt.Errorf("create cursor config dir: %w", err)
-	}
-
 	// Build env-wrapped command so the tmux session inherits critical env vars.
 	// tmux starts a new shell that doesn't inherit Go's os.Environ().
 	var envArgs []string
-	for _, key := range []string{"CURSOR_API_KEY", "PATH", "TERM"} {
+	for _, key := range []string{"CURSOR_API_KEY", "PATH", "HOME", "TERM"} {
 		if v := os.Getenv(key); v != "" {
 			envArgs = append(envArgs, key+"="+v)
 		}
 	}
-	// Point XDG_CONFIG_HOME to our isolated dir so cursor writes its config
-	// there instead of ~/.config/cursor/. Also override HOME as a fallback
-	// since cursor may derive the config path from HOME on some platforms.
-	envArgs = append(envArgs, "XDG_CONFIG_HOME="+configDir)
-	envArgs = append(envArgs, "HOME="+configDir)
 
 	args := append([]string{"env"}, envArgs...)
 	args = append(args, bin, "--force", "--workspace", dir)
 
 	name := fmt.Sprintf("cursor-cli-test-%d", time.Now().UnixNano())
 	unset := []string{"CI"}
-	s, err := NewTmuxSession(name, dir, unset, args[0], args[1:]...)
-	if err != nil {
-		_ = os.RemoveAll(configDir)
-		return nil, err
-	}
-	s.OnClose(func() { _ = os.RemoveAll(configDir) })
-	return s, nil
+	return NewTmuxSession(name, dir, unset, args[0], args[1:]...)
 }
 
 // acceptTrustDialogIfNeeded checks whether the workspace trust dialog appears
