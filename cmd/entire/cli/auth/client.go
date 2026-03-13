@@ -86,7 +86,7 @@ func (c *Client) StartDeviceAuth(ctx context.Context) (*DeviceAuthStart, error) 
 	}
 
 	var result DeviceAuthStart
-	if err := decodeJSON(resp.Body, &result); err != nil {
+	if err := decodeJSONStrict(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("decode device auth start response: %w", err)
 	}
 
@@ -163,13 +163,23 @@ func readAPIError(resp *http.Response, action string) error {
 }
 
 func decodeJSON(r io.Reader, dest any) error {
+	return decodeJSONWithOptions(r, dest, false)
+}
+
+func decodeJSONStrict(r io.Reader, dest any) error {
+	return decodeJSONWithOptions(r, dest, true)
+}
+
+func decodeJSONWithOptions(r io.Reader, dest any, strict bool) error {
 	body, err := io.ReadAll(io.LimitReader(r, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("read JSON response: %w", err)
 	}
 
 	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
+	if strict {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(dest); err != nil {
 		return fmt.Errorf("decode JSON response: %w", err)
 	}

@@ -68,3 +68,33 @@ func TestLookupToken(t *testing.T) {
 		t.Fatalf("LookupToken() = %q, want %q", got, "local-token")
 	}
 }
+
+func TestStoreLoad_IgnoresUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "auth.json")
+	store := NewStoreForPath(filePath)
+
+	contents := []byte(`{
+	  "tokens": {
+	    "https://entire.io": {
+	      "value": "prod-token",
+	      "created_at": "2026-03-13T00:00:00Z",
+	      "refresh_token": "ignored"
+	    }
+	  },
+	  "future_field": true
+	}`)
+	if err := os.WriteFile(filePath, contents, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := state.Tokens["https://entire.io"].Value; got != "prod-token" {
+		t.Fatalf("token = %q, want %q", got, "prod-token")
+	}
+}

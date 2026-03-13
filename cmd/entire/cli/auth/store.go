@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -72,9 +71,7 @@ func (s *Store) Load() (*File, error) {
 	}
 
 	var state File
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&state); err != nil {
+	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("parse auth file: %w", err)
 	}
 

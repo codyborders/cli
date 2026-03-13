@@ -14,6 +14,7 @@ import (
 )
 
 const fallbackDeviceAuthPollInterval = time.Second
+const slowDownBackoff = 5 * time.Second
 
 var browserOpener = openBrowser
 
@@ -101,7 +102,7 @@ func waitForApproval(ctx context.Context, client *auth.Client, deviceCode string
 		case "", "authorization_pending":
 			// continue below
 		case "slow_down":
-			pollInterval += time.Second
+			pollInterval += slowDownBackoff
 		case "access_denied":
 			return "", errors.New("device authorization denied")
 		case "expired_token":
@@ -136,6 +137,9 @@ func openBrowser(ctx context.Context, browserURL string) error {
 	case "linux":
 		command = "xdg-open"
 		args = []string{browserURL}
+	case "windows":
+		command = "cmd"
+		args = []string{"/c", "start", "", browserURL}
 	default:
 		return fmt.Errorf("unsupported platform %s", runtime.GOOS)
 	}
