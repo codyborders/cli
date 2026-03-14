@@ -18,8 +18,14 @@ const fallbackDeviceAuthPollInterval = time.Second
 const slowDownBackoff = 5 * time.Second
 const maxPollInterval = 30 * time.Second
 const maxExpiresIn = 15 * time.Minute
+const maxTransientErrors = 5
 
 var browserOpener = openBrowser
+
+// deviceAuthPoller abstracts the poll call so waitForApproval can be unit-tested.
+type deviceAuthPoller interface {
+	PollDeviceAuth(ctx context.Context, deviceCode string) (*auth.DeviceAuthPoll, error)
+}
 
 func newLoginCmd() *cobra.Command {
 	var printBrowserURL bool
@@ -84,7 +90,7 @@ func runLogin(ctx context.Context, outW, errW io.Writer, printBrowserURL bool) e
 	return nil
 }
 
-func waitForApproval(ctx context.Context, client *auth.Client, deviceCode string, expiresIn, interval int) (string, error) {
+func waitForApproval(ctx context.Context, poller deviceAuthPoller, deviceCode string, expiresIn, interval int) (string, error) {
 	expiry := time.Duration(expiresIn) * time.Second
 	if expiry <= 0 || expiry > maxExpiresIn {
 		expiry = maxExpiresIn
@@ -95,15 +101,28 @@ func waitForApproval(ctx context.Context, client *auth.Client, deviceCode string
 		pollInterval = fallbackDeviceAuthPollInterval
 	}
 
+	consecutiveErrors := 0
+
 	for {
 		if time.Now().After(deadline) {
 			return "", errors.New("device authorization expired")
 		}
 
-		result, err := client.PollDeviceAuth(ctx, deviceCode)
+		result, err := poller.PollDeviceAuth(ctx, deviceCode)
 		if err != nil {
-			return "", fmt.Errorf("poll approval status: %w", err)
+			consecutiveErrors++
+			if consecutiveErrors >= maxTransientErrors {
+				return "", fmt.Errorf("poll approval status (after %d consecutive failures): %w", consecutiveErrors, err)
+			}
+			// Transient error — wait and retry.
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("wait for approval: %w", ctx.Err())
+			case <-time.After(pollInterval):
+			}
+			continue
 		}
+		consecutiveErrors = 0
 
 		switch result.Error {
 		case "", "authorization_pending":
