@@ -100,12 +100,8 @@ func CollectTranscriptBlobHashes(tree *object.Tree, checkpointID id.CheckpointID
 
 		// Collect transcript blob hashes from tree entries.
 		// tree.Entries contains the direct children — no blob reads needed.
-		var hasBaseFile bool
-		var chunkEntries []object.TreeEntry
-
 		for _, entry := range sessionTree.Entries {
 			if entry.Name == paths.TranscriptFileName || entry.Name == paths.TranscriptFileNameLegacy {
-				hasBaseFile = true
 				refs = append(refs, TranscriptBlobRef{
 					SessionIndex: i,
 					Hash:         entry.Hash,
@@ -116,22 +112,12 @@ func CollectTranscriptBlobHashes(tree *object.Tree, checkpointID id.CheckpointID
 			if strings.HasPrefix(entry.Name, paths.TranscriptFileName+".") {
 				idx := agent.ParseChunkIndex(entry.Name, paths.TranscriptFileName)
 				if idx > 0 {
-					chunkEntries = append(chunkEntries, entry)
+					refs = append(refs, TranscriptBlobRef{
+						SessionIndex: i,
+						Hash:         entry.Hash,
+						Path:         sessionDir + "/" + entry.Name,
+					})
 				}
-			}
-		}
-
-		// If chunks exist and the base file is also a chunk (chunk 0), it's already collected.
-		// Add the numbered chunk entries.
-		if len(chunkEntries) > 0 {
-			// If there was no base file, that's OK — chunks stand alone
-			_ = hasBaseFile
-			for _, entry := range chunkEntries {
-				refs = append(refs, TranscriptBlobRef{
-					SessionIndex: i,
-					Hash:         entry.Hash,
-					Path:         sessionDir + "/" + entry.Name,
-				})
 			}
 		}
 	}
