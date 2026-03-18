@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"time"
@@ -61,7 +60,6 @@ func extractTranscriptMetadata(data []byte) transcriptMetadata {
 // estimateSessionDuration estimates session duration in milliseconds from JSONL transcript timestamps.
 // The "timestamp" field is a top-level field in JSONL lines (alongside "type", "uuid", "message"),
 // NOT inside the "message" object. We parse raw lines since transcript.Line doesn't capture it.
-// Uses bufio.Scanner for memory efficiency with large transcripts.
 // Returns 0 if timestamps are not available (e.g., Gemini transcripts).
 func estimateSessionDuration(data []byte) int64 {
 	type timestamped struct {
@@ -69,9 +67,7 @@ func estimateSessionDuration(data []byte) int64 {
 	}
 
 	var first, last time.Time
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		rawLine := scanner.Bytes()
+	for _, rawLine := range bytes.Split(data, []byte("\n")) {
 		if len(rawLine) == 0 {
 			continue
 		}

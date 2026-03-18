@@ -74,7 +74,7 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 		return fmt.Errorf("failed to read transcript: %w", err)
 	}
 
-	relModifiedFiles, relNewFiles, relDeletedFiles, fileDetectionFailed := collectFileChanges(ctx, logCtx, ag, transcriptPath, repoRoot)
+	relModifiedFiles, relNewFiles, relDeletedFiles, fileDetectionFailed := collectFileChanges(ctx, ag, transcriptPath, repoRoot)
 
 	if err := strategy.EnsureSetup(ctx); err != nil {
 		return fmt.Errorf("failed to set up strategy: %w", err)
@@ -201,7 +201,8 @@ func resolveAgentAndTranscript(ctx context.Context, w io.Writer, sessionID strin
 
 // collectFileChanges gathers modified, new, and deleted files from both transcript analysis and git status.
 // Returns detectionFailed=true if file change detection errored (distinct from finding no changes).
-func collectFileChanges(ctx, logCtx context.Context, ag agent.Agent, transcriptPath, repoRoot string) (modified, added, deleted []string, detectionFailed bool) {
+func collectFileChanges(ctx context.Context, ag agent.Agent, transcriptPath, repoRoot string) (modified, added, deleted []string, detectionFailed bool) {
+	logCtx := logging.WithComponent(ctx, "attach")
 	var transcriptFiles []string
 	if analyzer, ok := agent.AsTranscriptAnalyzer(ag); ok {
 		if files, _, fileErr := analyzer.ExtractModifiedFilesFromOffset(transcriptPath, 0); fileErr != nil {
