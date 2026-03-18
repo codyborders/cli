@@ -181,8 +181,8 @@ export ENTIRE_API_BASE_URL=http://localhost:8787
 Useful commands while developing:
 
 ```bash
-# Print the approval URL without auto-opening the browser
-go run ./cmd/entire login --print-browser-url
+# Run the login flow (prompts to press Enter before opening the browser)
+go run ./cmd/entire login
 
 # Run the focused integration coverage for login
 go test -tags=integration ./cmd/entire/cli/integration_test -run TestLogin

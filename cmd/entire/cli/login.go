@@ -32,7 +32,6 @@ type deviceAuthClient interface {
 }
 
 func newLoginCmd() *cobra.Command {
-	var printBrowserURL bool
 	var insecureHTTPAuth bool
 
 	cmd := &cobra.Command{
@@ -47,11 +46,10 @@ func newLoginCmd() *cobra.Command {
 				}
 			}
 
-			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser, printBrowserURL)
+			return runLogin(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser)
 		},
 	}
 
-	cmd.Flags().BoolVar(&printBrowserURL, "print-browser-url", false, "Print the approval URL instead of opening a browser")
 	cmd.Flags().BoolVar(&insecureHTTPAuth, "insecure-http-auth", false, "Allow authentication over plain HTTP (insecure, for local development only)")
 	if err := cmd.Flags().MarkHidden("insecure-http-auth"); err != nil {
 		panic(fmt.Sprintf("hide insecure-http-auth flag: %v", err))
@@ -60,7 +58,7 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
-func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc, printBrowserURL bool) error {
+func runLogin(ctx context.Context, inR io.Reader, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc) error {
 	start, err := client.StartDeviceAuth(ctx)
 	if err != nil {
 		return fmt.Errorf("start login: %w", err)
@@ -72,20 +70,26 @@ func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient
 		approvalURL = start.VerificationURI
 	}
 
-	fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
+	if canPromptInteractively() {
+		fmt.Fprintf(outW, "Press Enter to open %s in your browser...", approvalURL)
 
-	if printBrowserURL {
-		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
-	} else {
-		if err := openURL(ctx, approvalURL); err != nil {
-			fmt.Fprintf(errW, "Warning: failed to open browser automatically: %v\n", err)
-			fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
-		} else {
-			fmt.Fprintln(outW, "Opened your browser for approval.")
+		// Wait for the user to press Enter.
+		buf := make([]byte, 1)
+		if _, err := inR.Read(buf); err != nil {
+			fmt.Fprintln(outW)
 		}
-	}
 
-	fmt.Fprintln(outW, "Waiting for approval...")
+		if err := openURL(ctx, approvalURL); err != nil {
+			fmt.Fprintf(errW, "\nWarning: failed to open browser: %v\n", err)
+			fmt.Fprintf(outW, "\nOpen the URL above in your browser to continue.\n")
+		}
+
+		fmt.Fprintln(outW, "\nWaiting for approval...")
+	} else {
+		fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
+		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
+		fmt.Fprintln(outW, "Waiting for approval...")
+	}
 
 	token, err := waitForApproval(ctx, client, start.DeviceCode, start.ExpiresIn, start.Interval)
 	if err != nil {
