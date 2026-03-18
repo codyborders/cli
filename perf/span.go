@@ -79,7 +79,7 @@ func (s *Span) End() {
 	}
 
 	// Add child step durations (and error flags) as flat keys.
-	// Disambiguate duplicate child names (from loops) with .1, .2, etc. suffixes
+	// Disambiguate duplicate child names (from loops) with ~1, ~2, etc. suffixes
 	// to prevent later values from overwriting earlier ones in JSON output.
 	//
 	// Group spans (children that have their own children) also emit grandchildren
