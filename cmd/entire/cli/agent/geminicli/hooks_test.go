@@ -561,9 +561,14 @@ func TestInstallHooks_RemovesLegacyEnabledField_WhenAlreadyInstalled(t *testing.
 }`)
 
 	agent := &GeminiCLIAgent{}
-	_, err := agent.InstallHooks(context.Background(), false, false)
+	n, err := agent.InstallHooks(context.Background(), false, false)
 	if err != nil {
 		t.Fatalf("InstallHooks() error = %v", err)
+	}
+
+	// Hooks were already installed — cleanup-only run should return 0, not 12.
+	if n != 0 {
+		t.Errorf("InstallHooks() count = %d, want 0 (hooks already installed, only cleanup occurred)", n)
 	}
 
 	// Verify "enabled" boolean is gone even though idempotency would have fired

@@ -131,14 +131,19 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 	parseGeminiHookType(rawHooks, "PreCompress", &preCompress)
 	parseGeminiHookType(rawHooks, "Notification", &notification)
 
-	// Check for idempotency BEFORE removing hooks
-	// If the exact same hook command already exists, return 0 (no changes needed)
-	// Skip early return if cleanup happened — we still need to write the file.
-	if !force && !cleanupDone {
+	// Check for idempotency BEFORE removing hooks.
+	// If the exact same hook command already exists, hooks are already installed.
+	// When cleanupDone, we still need to write the file to persist the cleanup,
+	// but we return 0 (not 12) so callers know no hooks were added.
+	alreadyInstalled := false
+	if !force {
 		existingCmd := getFirstEntireHookCommand(sessionStart)
 		expectedCmd := cmdPrefix + "session-start"
 		if existingCmd == expectedCmd {
-			return 0, nil // Already installed with same mode
+			if !cleanupDone {
+				return 0, nil // Already installed with same mode, nothing to write
+			}
+			alreadyInstalled = true // Cleanup needed — fall through to write
 		}
 	}
 
@@ -235,6 +240,9 @@ func (g *GeminiCLIAgent) InstallHooks(ctx context.Context, localDev bool, force 
 		return 0, fmt.Errorf("failed to write settings.json: %w", err)
 	}
 
+	if alreadyInstalled {
+		return 0, nil
+	}
 	return count, nil
 }
 
