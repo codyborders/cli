@@ -22,7 +22,7 @@ export const EntirePlugin: Plugin = async ({ $, directory }) => {
   async function callHook(hookName: string, payload: Record<string, unknown>) {
     try {
       const json = JSON.stringify(payload)
-      await $`echo ${json} | ${ENTIRE_CMD} hooks opencode ${hookName}`.quiet().nothrow()
+      await $`echo ${json} | ${ENTIRE_CMD} hooks opencode ${hookName}`.cwd(directory).quiet().nothrow()
     } catch {
       // Silently ignore — plugin failures must not crash OpenCode
     }
