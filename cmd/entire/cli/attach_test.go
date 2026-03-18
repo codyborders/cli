@@ -1,0 +1,559 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/entireio/cli/cmd/entire/cli/agent"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode" // register agent
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"  // register agent
+	"github.com/entireio/cli/cmd/entire/cli/session"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
+)
+
+func TestAttach_MissingSessionID(t *testing.T) {
+	t.Parallel()
+
+	cmd := newAttachCmd()
+	cmd.SetArgs([]string{})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing session ID")
+	}
+}
+
+func TestAttach_TranscriptNotFound(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	// Set up a fake Claude project dir that's empty
+	t.Setenv("ENTIRE_TEST_CLAUDE_PROJECT_DIR", t.TempDir())
+	// Redirect HOME so the fallback search doesn't walk real ~/.claude/projects
+	t.Setenv("HOME", t.TempDir())
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, "nonexistent-session-id", agent.AgentNameClaudeCode, false)
+	if err == nil {
+		t.Fatal("expected error for missing transcript")
+	}
+}
+
+func TestAttach_Success(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	sessionID := "test-attach-session-001"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Write","input":{"file_path":"`+tmpDir+`/hello.txt","content":"world"}}]},"uuid":"uuid-2"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"wrote file"}]},"uuid":"uuid-3"}
+`)
+
+	// Create the file that the transcript says was modified
+	testutil.WriteFile(t, tmpDir, "hello.txt", "world")
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	// Verify session state was created
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected session state to be created")
+	}
+	if state.SessionID != sessionID {
+		t.Errorf("session ID = %q, want %q", state.SessionID, sessionID)
+	}
+	if state.LastCheckpointID.IsEmpty() {
+		t.Error("expected LastCheckpointID to be set after attach")
+	}
+
+	// Verify output message
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+}
+
+func TestAttach_SessionAlreadyTracked(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	sessionID := "test-attach-duplicate"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
+`)
+
+	// Pre-create session state
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(context.Background(), &session.State{
+		SessionID: sessionID,
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err = runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
+	if err == nil {
+		t.Fatal("expected error for already-tracked session")
+	}
+}
+
+func TestAttach_OutputContainsCheckpointID(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	sessionID := "test-attach-checkpoint-output"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Write","input":{"file_path":"`+tmpDir+`/hello.txt","content":"world"}}]},"uuid":"uuid-2"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"wrote file"}]},"uuid":"uuid-3"}
+`)
+	testutil.WriteFile(t, tmpDir, "hello.txt", "world")
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	output := out.String()
+
+	// Must contain Entire-Checkpoint trailer with 12-hex-char ID
+	re := regexp.MustCompile(`Entire-Checkpoint: [0-9a-f]{12}`)
+	if !re.MatchString(output) {
+		t.Errorf("expected 'Entire-Checkpoint: <12-hex-id>' in output, got:\n%s", output)
+	}
+}
+
+func TestAttach_WritesPromptFile(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	sessionID := "test-attach-prompt-file"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"fix the bug"},"uuid":"uuid-1"}
+{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"uuid-2"}
+`)
+
+	var out bytes.Buffer
+	if err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false); err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	// Verify prompt.txt was written to session metadata directory
+	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
+	promptData, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("prompt.txt not found: %v", err)
+	}
+	if string(promptData) != "fix the bug" {
+		t.Errorf("prompt.txt = %q, want %q", string(promptData), "fix the bug")
+	}
+}
+
+func TestAttach_PopulatesTokenUsage(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	sessionID := "test-attach-token-usage"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"u1"}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"uuid":"a1"}
+`)
+
+	var out bytes.Buffer
+	if err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false); err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.TokenUsage == nil {
+		t.Fatal("expected TokenUsage to be set")
+	}
+	if state.TokenUsage.OutputTokens == 0 {
+		t.Error("expected OutputTokens > 0")
+	}
+}
+
+func TestAttach_SetsSessionTurnCount(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	sessionID := "test-attach-turn-count"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"first prompt"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":"response 1"},"uuid":"a1"}
+{"type":"user","message":{"role":"user","content":"second prompt"},"uuid":"u2"}
+{"type":"assistant","message":{"role":"assistant","content":"response 2"},"uuid":"a2"}
+`)
+
+	var out bytes.Buffer
+	if err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false); err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SessionTurnCount != 2 {
+		t.Errorf("SessionTurnCount = %d, want 2", state.SessionTurnCount)
+	}
+}
+
+func TestCountUserTurns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{
+			name: "gemini format",
+			data: []byte(`{"messages":[{"type":"user","content":"first"},{"type":"gemini","content":"ok"},{"type":"user","content":"second"},{"type":"gemini","content":"done"}]}`),
+			want: 2,
+		},
+		{
+			name: "jsonl with tool_result should not double count",
+			data: []byte(`{"type":"user","message":{"role":"user","content":"hello"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Write","input":{}}]},"uuid":"a1"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"ok"}]},"uuid":"u2"}
+{"type":"user","message":{"role":"user","content":"next prompt"},"uuid":"u3"}
+`),
+			want: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractTranscriptMetadata(tt.data).TurnCount
+			if got != tt.want {
+				t.Errorf("extractTranscriptMetadata().TurnCount = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractModelFromTranscript(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{
+			name: "claude code with model",
+			data: []byte(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1"}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"hello"}]},"uuid":"a1"}
+`),
+			want: "claude-sonnet-4-20250514",
+		},
+		{
+			name: "no model field",
+			data: []byte(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":"hello"},"uuid":"a1"}
+`),
+			want: "",
+		},
+		{
+			name: "gemini format (no model in transcript)",
+			data: []byte(`{"messages":[{"type":"user","content":"hi"},{"type":"gemini","content":"hello"}]}`),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractTranscriptMetadata(tt.data).Model
+			if got != tt.want {
+				t.Errorf("extractTranscriptMetadata().Model = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEstimateSessionDuration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		data    []byte
+		wantPos bool
+	}{
+		{
+			name: "jsonl with timestamps",
+			data: []byte(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1","timestamp":"2026-01-01T10:00:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":"hello"},"uuid":"a1","timestamp":"2026-01-01T10:05:00.000Z"}
+`),
+			wantPos: true,
+		},
+		{
+			name:    "no timestamps",
+			data:    []byte("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"},\"uuid\":\"u1\"}\n"),
+			wantPos: false,
+		},
+		{
+			name:    "gemini format (no timestamps)",
+			data:    []byte(`{"messages":[{"type":"user","content":"hi"}]}`),
+			wantPos: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := estimateSessionDuration(tt.data)
+			if tt.wantPos && got <= 0 {
+				t.Errorf("estimateSessionDuration() = %d, want > 0", got)
+			}
+			if !tt.wantPos && got != 0 {
+				t.Errorf("estimateSessionDuration() = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestNormalizeGeminiTranscript(t *testing.T) {
+	t.Parallel()
+
+	// Raw Gemini format has content as array of objects for user messages,
+	// plus extra fields (timestamp, model, tokens) that must be preserved.
+	raw := []byte(`{"sessionId":"abc","messages":[{"id":"m1","type":"user","timestamp":"2026-01-01T10:00:00Z","content":[{"text":"fix the bug"}]},{"id":"m2","type":"gemini","content":"ok","model":"gemini-3-flash","tokens":{"input":100}}]}`)
+	normalized, err := normalizeGeminiTranscript(raw)
+	if err != nil {
+		t.Fatalf("normalizeGeminiTranscript() error: %v", err)
+	}
+
+	// After normalization, content should be a plain string
+	var result struct {
+		SessionID string `json:"sessionId"`
+		Messages  []struct {
+			ID        string `json:"id"`
+			Type      string `json:"type"`
+			Content   string `json:"content"`
+			Timestamp string `json:"timestamp"`
+			Model     string `json:"model"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(normalized, &result); err != nil {
+		t.Fatalf("failed to parse normalized transcript: %v", err)
+	}
+	if result.SessionID != "abc" {
+		t.Errorf("sessionId = %q, want %q", result.SessionID, "abc")
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result.Messages))
+	}
+	if result.Messages[0].Content != "fix the bug" {
+		t.Errorf("user content = %q, want %q", result.Messages[0].Content, "fix the bug")
+	}
+	if result.Messages[0].Timestamp != "2026-01-01T10:00:00Z" {
+		t.Errorf("user timestamp = %q, want preserved", result.Messages[0].Timestamp)
+	}
+	if result.Messages[1].Content != "ok" {
+		t.Errorf("gemini content = %q, want %q", result.Messages[1].Content, "ok")
+	}
+	if result.Messages[1].Model != "gemini-3-flash" {
+		t.Errorf("model = %q, want preserved", result.Messages[1].Model)
+	}
+}
+
+func TestExtractFirstPromptFromTranscript_GeminiFormat(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`{"messages":[{"type":"user","content":"fix the login bug"},{"type":"gemini","content":"I'll look at that"}]}`)
+	got := extractTranscriptMetadata(data).FirstPrompt
+	if got != "fix the login bug" {
+		t.Errorf("extractTranscriptMetadata(gemini).FirstPrompt = %q, want %q", got, "fix the login bug")
+	}
+}
+
+func TestExtractFirstPromptFromTranscript_JSONLFormat(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`{"type":"user","message":{"role":"user","content":"hello world"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":"hi"},"uuid":"a1"}
+`)
+	got := extractTranscriptMetadata(data).FirstPrompt
+	if got != "hello world" {
+		t.Errorf("extractTranscriptMetadata(jsonl).FirstPrompt = %q, want %q", got, "hello world")
+	}
+}
+
+func TestAttach_GeminiSubdirectorySession(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	// Redirect HOME so searchTranscriptInProjectDirs searches our fake Gemini dir
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	// Create a Gemini transcript in a *different* project hash directory,
+	// simulating a session started from a subdirectory (different CWD hash).
+	differentProjectDir := filepath.Join(fakeHome, ".gemini", "tmp", "different-hash", "chats")
+	if err := os.MkdirAll(differentProjectDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := "abcd1234-gemini-subdir-test"
+	transcriptContent := `{"messages":[{"type":"user","content":"hello"},{"type":"gemini","content":"hi"}]}`
+	// Gemini names files as session-<date>-<shortid>.json where shortid = sessionID[:8]
+	transcriptFile := filepath.Join(differentProjectDir, "session-2026-01-01T10-00-abcd1234.json")
+	if err := os.WriteFile(transcriptFile, []byte(transcriptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set the expected project dir to an empty directory so the primary lookup fails
+	// and the fallback search kicks in.
+	emptyProjectDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_GEMINI_PROJECT_DIR", emptyProjectDir)
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameGemini, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+
+	// Verify session state was created with Gemini agent type
+	store, storeErr := session.NewStateStore(context.Background())
+	if storeErr != nil {
+		t.Fatal(storeErr)
+	}
+	state, loadErr := store.Load(context.Background(), sessionID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if state == nil {
+		t.Fatal("expected session state to be created")
+	}
+	if state.AgentType != agent.AgentTypeGemini {
+		t.Errorf("AgentType = %q, want %q", state.AgentType, agent.AgentTypeGemini)
+	}
+	if state.LastCheckpointID.IsEmpty() {
+		t.Error("expected LastCheckpointID to be set after attach")
+	}
+}
+
+func TestAttach_GeminiSuccess(t *testing.T) {
+	tmpDir := setupAttachTestRepo(t)
+
+	// Create Gemini transcript in expected project dir
+	geminiDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_GEMINI_PROJECT_DIR", geminiDir)
+
+	sessionID := "abcd1234-gemini-success-test"
+	transcriptContent := `{"messages":[{"type":"user","content":"fix the login bug"},{"type":"gemini","content":"I will fix the login bug now."}]}`
+	transcriptFile := filepath.Join(geminiDir, "session-2026-01-01T10-00-abcd1234.json")
+	if err := os.WriteFile(transcriptFile, []byte(transcriptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameGemini, false)
+	if err != nil {
+		t.Fatalf("runAttach failed: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+
+	// Verify session state
+	store, storeErr := session.NewStateStore(context.Background())
+	if storeErr != nil {
+		t.Fatal(storeErr)
+	}
+	state, loadErr := store.Load(context.Background(), sessionID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if state == nil {
+		t.Fatal("expected session state to be created")
+	}
+	if state.AgentType != agent.AgentTypeGemini {
+		t.Errorf("AgentType = %q, want %q", state.AgentType, agent.AgentTypeGemini)
+	}
+	if state.SessionTurnCount != 1 {
+		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
+	}
+
+	// Verify prompt.txt was written
+	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
+	promptData, readErr := os.ReadFile(promptFile)
+	if readErr != nil {
+		t.Fatalf("prompt.txt not found: %v", readErr)
+	}
+	if string(promptData) != "fix the login bug" {
+		t.Errorf("prompt.txt = %q, want %q", string(promptData), "fix the login bug")
+	}
+}
+
+// setupAttachTestRepo creates a temp git repo with one commit and enables Entire.
+// Returns the repo directory. Caller must not use t.Parallel() (uses t.Chdir).
+func setupAttachTestRepo(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	testutil.WriteFile(t, tmpDir, "init.txt", "init")
+	testutil.GitAdd(t, tmpDir, "init.txt")
+	testutil.GitCommit(t, tmpDir, "init")
+	t.Chdir(tmpDir)
+	enableEntire(t, tmpDir)
+	return tmpDir
+}
+
+// setupClaudeTranscript creates a fake Claude transcript file and returns the session directory.
+func setupClaudeTranscript(t *testing.T, sessionID, content string) {
+	t.Helper()
+	claudeDir := t.TempDir()
+	t.Setenv("ENTIRE_TEST_CLAUDE_PROJECT_DIR", claudeDir)
+	if err := os.WriteFile(filepath.Join(claudeDir, sessionID+".jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// enableEntire creates the .entire/settings.json file to mark Entire as enabled.
+func enableEntire(t *testing.T, repoDir string) {
+	t.Helper()
+	entireDir := filepath.Join(repoDir, ".entire")
+	if err := os.MkdirAll(entireDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	settingsContent := `{"enabled": true}`
+	if err := os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
