@@ -167,6 +167,9 @@ func resumeFromCurrentBranch(ctx context.Context, branchName string, force bool)
 	// Multiple checkpoints (squash merge): resolve latest by CreatedAt timestamp.
 	// resolveLatestCheckpoint also returns the metadata tree so we can reuse it
 	// for the ReadCheckpointMetadata call below without a redundant lookup.
+	// Both metadataTree and freshRepo are set together — either by resolveLatestCheckpoint
+	// (multi-checkpoint path) or by getMetadataTree (single-checkpoint path below).
+	// freshRepo is always non-nil before it reaches NewFetchingTree.
 	var metadataTree *object.Tree
 	var freshRepo *git.Repository
 	if len(result.checkpointIDs) > 1 {
