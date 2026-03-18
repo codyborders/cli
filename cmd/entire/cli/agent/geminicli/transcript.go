@@ -216,6 +216,12 @@ func GetLastMessageIDFromFile(path string) (string, error) {
 // NormalizeTranscript normalizes user message content fields in-place from
 // [{"text":"..."}] arrays to plain strings, preserving all other transcript fields
 // (timestamps, thoughts, tokens, model, toolCalls, etc.).
+//
+// This operates on raw JSON rather than using ParseTranscript + re-marshal because
+// GeminiMessage only captures a subset of fields (id, type, content, toolCalls).
+// Round-tripping through the struct would silently drop fields like timestamp, model,
+// and tokens that are present in real Gemini transcripts. The raw approach rewrites
+// only the content values while leaving all other fields untouched.
 func NormalizeTranscript(data []byte) ([]byte, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
