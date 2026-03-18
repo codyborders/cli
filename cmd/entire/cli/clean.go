@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -471,20 +470,20 @@ type TempFileDeleteError struct {
 }
 
 // deleteTempFiles removes all files in .entire/tmp/.
+// Uses os.Root to ensure deletions are confined to the temp directory.
 // Returns successfully deleted files and any failures with their error reasons.
-func deleteTempFiles(ctx context.Context, files []string) (deleted []string, failed []TempFileDeleteError) {
-	tmpDir, err := paths.AbsPath(ctx, paths.EntireTmpDir)
+func deleteTempFiles(_ context.Context, files []string) (deleted []string, failed []TempFileDeleteError) {
+	root, err := os.OpenRoot(paths.EntireTmpDir)
 	if err != nil {
-		// Can't get path - mark all as failed with the same error
 		for _, file := range files {
 			failed = append(failed, TempFileDeleteError{File: file, Err: err})
 		}
 		return nil, failed
 	}
+	defer root.Close()
 
 	for _, file := range files {
-		path := filepath.Join(tmpDir, file)
-		if err := os.Remove(path); err != nil {
+		if err := root.Remove(file); err != nil {
 			failed = append(failed, TempFileDeleteError{File: file, Err: err})
 		} else {
 			deleted = append(deleted, file)
