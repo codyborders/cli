@@ -79,13 +79,13 @@ func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient
 		waitForEnter()
 
 		fmt.Fprintln(outW)
+
+		if err := openURL(ctx, approvalURL); err != nil {
+			fmt.Fprintf(errW, "Warning: failed to open browser: %v\n", err)
+			fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
+		}
 	} else {
 		fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
-	}
-
-	if err := openURL(ctx, approvalURL); err != nil {
-		fmt.Fprintf(errW, "Warning: failed to open browser: %v\n", err)
-		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
 	}
 
 	fmt.Fprintln(outW, "Waiting for approval...")
