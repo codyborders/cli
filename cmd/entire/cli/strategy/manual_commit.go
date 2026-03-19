@@ -76,6 +76,12 @@ func (s *ManualCommitStrategy) SetBlobFetcher(f checkpoint.BlobFetchFunc) {
 	s.blobFetcher = f
 }
 
+// HasBlobFetcher reports whether a blob fetcher is configured.
+// Used in tests to verify the strategy is properly wired for treeless fetch support.
+func (s *ManualCommitStrategy) HasBlobFetcher() bool {
+	return s.blobFetcher != nil
+}
+
 // ValidateRepository validates that the repository is suitable for this strategy.
 func (s *ManualCommitStrategy) ValidateRepository() error {
 	repo, err := OpenRepository(context.Background())
