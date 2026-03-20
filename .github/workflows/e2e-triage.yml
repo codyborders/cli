@@ -181,7 +181,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          TRIAGE_OUTPUT_FILE: ${{ github.workspace }}/e2e-triage-artifacts/${{ matrix.agent }}/triage.log
+          TRIAGE_OUTPUT_FILE: ${{ github.workspace }}/e2e-triage-artifacts/${{ matrix.agent }}/triage.md
           TRIAGE_SHA: ${{ needs.matrix-setup.outputs.sha }}
         run: scripts/run-e2e-triage.sh
 
@@ -190,7 +190,7 @@ jobs:
         if: always()
         shell: bash
         env:
-          TRIAGE_OUTPUT_FILE: ${{ github.workspace }}/e2e-triage-artifacts/${{ matrix.agent }}/triage.log
+          TRIAGE_OUTPUT_FILE: ${{ github.workspace }}/e2e-triage-artifacts/${{ matrix.agent }}/triage.md
         run: |
           set -euo pipefail
 
