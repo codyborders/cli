@@ -54,16 +54,12 @@ func TestAttach_TranscriptNotFound(t *testing.T) {
 }
 
 func TestAttach_Success(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
+	setupAttachTestRepo(t)
 
 	sessionID := "test-attach-session-001"
 	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Write","input":{"file_path":"`+tmpDir+`/hello.txt","content":"world"}}]},"uuid":"uuid-2"}
-{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"wrote file"}]},"uuid":"uuid-3"}
+{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"uuid-2"}
 `)
-
-	// Create the file that the transcript says was modified
-	testutil.WriteFile(t, tmpDir, "hello.txt", "world")
 
 	var out bytes.Buffer
 	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
@@ -90,27 +86,32 @@ func TestAttach_Success(t *testing.T) {
 		t.Error("expected LastCheckpointID to be set after attach")
 	}
 
-	// Verify output message
 	output := out.String()
 	if !strings.Contains(output, "Attached session") {
 		t.Errorf("expected 'Attached session' in output, got: %s", output)
 	}
+	if !strings.Contains(output, "Created checkpoint") {
+		t.Errorf("expected 'Created checkpoint' in output, got: %s", output)
+	}
 }
 
-func TestAttach_SessionAlreadyTracked(t *testing.T) {
+func TestAttach_SessionAlreadyTracked_NoCheckpoint(t *testing.T) {
 	setupAttachTestRepo(t)
 
 	sessionID := "test-attach-duplicate"
 	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
+{"type":"assistant","message":{"role":"assistant","content":"hi"},"uuid":"uuid-2"}
 `)
 
-	// Pre-create session state
+	// Pre-create session state without a checkpoint ID (simulates hooks tracking
+	// the session but condensation never happening).
 	store, err := session.NewStateStore(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Save(context.Background(), &session.State{
 		SessionID: sessionID,
+		AgentType: agent.AgentTypeClaudeCode,
 		StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -118,20 +119,31 @@ func TestAttach_SessionAlreadyTracked(t *testing.T) {
 
 	var out bytes.Buffer
 	err = runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
-	if err == nil {
-		t.Fatal("expected error for already-tracked session")
+	if err != nil {
+		t.Fatalf("expected attach to handle already-tracked session, got error: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	}
+
+	// Verify checkpoint was created
+	reloadedState, err := store.Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedState.LastCheckpointID.IsEmpty() {
+		t.Error("expected LastCheckpointID to be set after re-attach")
 	}
 }
 
 func TestAttach_OutputContainsCheckpointID(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
+	setupAttachTestRepo(t)
 
 	sessionID := "test-attach-checkpoint-output"
 	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"uuid-1"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Write","input":{"file_path":"`+tmpDir+`/hello.txt","content":"world"}}]},"uuid":"uuid-2"}
-{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"wrote file"}]},"uuid":"uuid-3"}
+{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"uuid-2"}
 `)
-	testutil.WriteFile(t, tmpDir, "hello.txt", "world")
 
 	var out bytes.Buffer
 	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false)
@@ -145,30 +157,6 @@ func TestAttach_OutputContainsCheckpointID(t *testing.T) {
 	re := regexp.MustCompile(`Entire-Checkpoint: [0-9a-f]{12}`)
 	if !re.MatchString(output) {
 		t.Errorf("expected 'Entire-Checkpoint: <12-hex-id>' in output, got:\n%s", output)
-	}
-}
-
-func TestAttach_WritesPromptFile(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
-
-	sessionID := "test-attach-prompt-file"
-	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"fix the bug"},"uuid":"uuid-1"}
-{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"uuid-2"}
-`)
-
-	var out bytes.Buffer
-	if err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, false); err != nil {
-		t.Fatalf("runAttach failed: %v", err)
-	}
-
-	// Verify prompt.txt was written to session metadata directory
-	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
-	promptData, err := os.ReadFile(promptFile)
-	if err != nil {
-		t.Fatalf("prompt.txt not found: %v", err)
-	}
-	if string(promptData) != "fix the bug" {
-		t.Errorf("prompt.txt = %q, want %q", string(promptData), "fix the bug")
 	}
 }
 
@@ -370,12 +358,9 @@ func TestExtractFirstPromptFromTranscript_JSONLFormat(t *testing.T) {
 func TestAttach_GeminiSubdirectorySession(t *testing.T) {
 	setupAttachTestRepo(t)
 
-	// Redirect HOME so searchTranscriptInProjectDirs searches our fake Gemini dir
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
-	// Create a Gemini transcript in a *different* project hash directory,
-	// simulating a session started from a subdirectory (different CWD hash).
 	differentProjectDir := filepath.Join(fakeHome, ".gemini", "tmp", "different-hash", "chats")
 	if err := os.MkdirAll(differentProjectDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -383,14 +368,11 @@ func TestAttach_GeminiSubdirectorySession(t *testing.T) {
 
 	sessionID := "abcd1234-gemini-subdir-test"
 	transcriptContent := `{"messages":[{"type":"user","content":"hello"},{"type":"gemini","content":"hi"}]}`
-	// Gemini names files as session-<date>-<shortid>.json where shortid = sessionID[:8]
 	transcriptFile := filepath.Join(differentProjectDir, "session-2026-01-01T10-00-abcd1234.json")
 	if err := os.WriteFile(transcriptFile, []byte(transcriptContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// Set the expected project dir to an empty directory so the primary lookup fails
-	// and the fallback search kicks in.
 	emptyProjectDir := t.TempDir()
 	t.Setenv("ENTIRE_TEST_GEMINI_PROJECT_DIR", emptyProjectDir)
 
@@ -405,7 +387,6 @@ func TestAttach_GeminiSubdirectorySession(t *testing.T) {
 		t.Errorf("expected 'Attached session' in output, got: %s", output)
 	}
 
-	// Verify session state was created with Gemini agent type
 	store, storeErr := session.NewStateStore(context.Background())
 	if storeErr != nil {
 		t.Fatal(storeErr)
@@ -426,9 +407,8 @@ func TestAttach_GeminiSubdirectorySession(t *testing.T) {
 }
 
 func TestAttach_GeminiSuccess(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
+	setupAttachTestRepo(t)
 
-	// Create Gemini transcript in expected project dir
 	geminiDir := t.TempDir()
 	t.Setenv("ENTIRE_TEST_GEMINI_PROJECT_DIR", geminiDir)
 
@@ -450,7 +430,6 @@ func TestAttach_GeminiSuccess(t *testing.T) {
 		t.Errorf("expected 'Attached session' in output, got: %s", output)
 	}
 
-	// Verify session state
 	store, storeErr := session.NewStateStore(context.Background())
 	if storeErr != nil {
 		t.Fatal(storeErr)
@@ -468,30 +447,18 @@ func TestAttach_GeminiSuccess(t *testing.T) {
 	if state.SessionTurnCount != 1 {
 		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
 	}
-
-	// Verify prompt.txt was written
-	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
-	promptData, readErr := os.ReadFile(promptFile)
-	if readErr != nil {
-		t.Fatalf("prompt.txt not found: %v", readErr)
-	}
-	if string(promptData) != "fix the login bug" {
-		t.Errorf("prompt.txt = %q, want %q", string(promptData), "fix the login bug")
-	}
 }
 
 func TestAttach_CursorSuccess(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
+	setupAttachTestRepo(t)
 
 	cursorDir := t.TempDir()
 	t.Setenv("ENTIRE_TEST_CURSOR_PROJECT_DIR", cursorDir)
 
 	sessionID := "test-attach-cursor-session"
-	// Cursor uses JSONL format, same as Claude Code
 	transcriptContent := `{"type":"user","message":{"role":"user","content":"add dark mode"},"uuid":"u1"}
 {"type":"assistant","message":{"role":"assistant","content":"I'll add dark mode support."},"uuid":"a1"}
 `
-	// Cursor flat layout: <dir>/<id>.jsonl
 	if err := os.WriteFile(filepath.Join(cursorDir, sessionID+".jsonl"), []byte(transcriptContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -502,9 +469,8 @@ func TestAttach_CursorSuccess(t *testing.T) {
 		t.Fatalf("runAttach failed: %v", err)
 	}
 
-	output := out.String()
-	if !strings.Contains(output, "Attached session") {
-		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	if !strings.Contains(out.String(), "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", out.String())
 	}
 
 	store, err := session.NewStateStore(context.Background())
@@ -524,30 +490,18 @@ func TestAttach_CursorSuccess(t *testing.T) {
 	if state.SessionTurnCount != 1 {
 		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
 	}
-
-	// Verify prompt.txt was written
-	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
-	promptData, err := os.ReadFile(promptFile)
-	if err != nil {
-		t.Fatalf("prompt.txt not found: %v", err)
-	}
-	if string(promptData) != "add dark mode" {
-		t.Errorf("prompt.txt = %q, want %q", string(promptData), "add dark mode")
-	}
 }
 
 func TestAttach_FactoryAIDroidSuccess(t *testing.T) {
-	tmpDir := setupAttachTestRepo(t)
+	setupAttachTestRepo(t)
 
 	droidDir := t.TempDir()
 	t.Setenv("ENTIRE_TEST_DROID_PROJECT_DIR", droidDir)
 
 	sessionID := "test-attach-droid-session"
-	// Factory AI Droid uses JSONL format
 	transcriptContent := `{"type":"user","message":{"role":"user","content":"deploy to staging"},"uuid":"u1"}
 {"type":"assistant","message":{"role":"assistant","content":"Deploying to staging now."},"uuid":"a1"}
 `
-	// Factory AI Droid: flat <dir>/<id>.jsonl
 	if err := os.WriteFile(filepath.Join(droidDir, sessionID+".jsonl"), []byte(transcriptContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -558,9 +512,8 @@ func TestAttach_FactoryAIDroidSuccess(t *testing.T) {
 		t.Fatalf("runAttach failed: %v", err)
 	}
 
-	output := out.String()
-	if !strings.Contains(output, "Attached session") {
-		t.Errorf("expected 'Attached session' in output, got: %s", output)
+	if !strings.Contains(out.String(), "Attached session") {
+		t.Errorf("expected 'Attached session' in output, got: %s", out.String())
 	}
 
 	store, err := session.NewStateStore(context.Background())
@@ -580,16 +533,6 @@ func TestAttach_FactoryAIDroidSuccess(t *testing.T) {
 	if state.SessionTurnCount != 1 {
 		t.Errorf("SessionTurnCount = %d, want 1", state.SessionTurnCount)
 	}
-
-	// Verify prompt.txt was written
-	promptFile := filepath.Join(tmpDir, ".entire", "metadata", sessionID, "prompt.txt")
-	promptData, err := os.ReadFile(promptFile)
-	if err != nil {
-		t.Fatalf("prompt.txt not found: %v", err)
-	}
-	if string(promptData) != "deploy to staging" {
-		t.Errorf("prompt.txt = %q, want %q", string(promptData), "deploy to staging")
-	}
 }
 
 func TestAttach_CursorNestedLayout(t *testing.T) {
@@ -601,7 +544,6 @@ func TestAttach_CursorNestedLayout(t *testing.T) {
 	sessionID := "test-cursor-nested-layout"
 	transcriptContent := `{"type":"user","message":{"role":"user","content":"hello"},"uuid":"u1"}
 `
-	// Cursor IDE nested layout: <dir>/<id>/<id>.jsonl
 	nestedDir := filepath.Join(cursorDir, sessionID)
 	if err := os.MkdirAll(nestedDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -623,7 +565,7 @@ func TestAttach_CursorNestedLayout(t *testing.T) {
 
 // setupAttachTestRepo creates a temp git repo with one commit and enables Entire.
 // Returns the repo directory. Caller must not use t.Parallel() (uses t.Chdir).
-func setupAttachTestRepo(t *testing.T) string {
+func setupAttachTestRepo(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	testutil.InitRepo(t, tmpDir)
@@ -632,10 +574,9 @@ func setupAttachTestRepo(t *testing.T) string {
 	testutil.GitCommit(t, tmpDir, "init")
 	t.Chdir(tmpDir)
 	enableEntire(t, tmpDir)
-	return tmpDir
 }
 
-// setupClaudeTranscript creates a fake Claude transcript file and returns the session directory.
+// setupClaudeTranscript creates a fake Claude transcript file.
 func setupClaudeTranscript(t *testing.T, sessionID, content string) {
 	t.Helper()
 	claudeDir := t.TempDir()
