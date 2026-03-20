@@ -17,7 +17,7 @@ E2E fails -> bot posts alert to Slack (with "Run Triage" link)
 
 ## Cloudflare Worker
 
-Located in `workers/e2e-triage-trigger/`.
+Source lives in the infra repo at `cloudflare/workers/e2e-triage-trigger/`.
 
 Accepts a GET request at `/triage` with query parameters:
 
