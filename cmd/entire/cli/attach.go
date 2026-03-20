@@ -225,6 +225,7 @@ func saveAttachSessionState(ctx context.Context, existingState *session.State, s
 	}
 
 	state.CLIVersion = versioninfo.Version
+	state.AttachedManually = true
 	state.AgentType = agentType
 	state.TranscriptPath = transcriptPath
 	state.LastCheckpointID = checkpointID
