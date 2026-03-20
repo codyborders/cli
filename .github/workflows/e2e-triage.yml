@@ -242,6 +242,17 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
+          # Print triage output to job summary
+          if [ -f "$TRIAGE_OUTPUT_FILE" ]; then
+            {
+              echo "## E2E Triage: ${E2E_AGENT}"
+              echo ""
+              cat "$TRIAGE_OUTPUT_FILE"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No triage output file found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Post triage completion
         if: ${{ always() && (steps.triage.outcome == 'success' || steps.triage.outcome == 'failure') && env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL != '' && env.SLACK_THREAD_TS != '' }}
         shell: bash
