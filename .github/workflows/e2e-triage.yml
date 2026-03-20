@@ -243,15 +243,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           # Print triage output to job summary
-          if [ -f "$TRIAGE_OUTPUT_FILE" ]; then
-            {
-              echo "## E2E Triage: ${E2E_AGENT}"
-              echo ""
+          {
+            echo "## E2E Triage: ${E2E_AGENT}"
+            echo ""
+            if [ -f "$TRIAGE_OUTPUT_FILE" ] && [ -s "$TRIAGE_OUTPUT_FILE" ]; then
               cat "$TRIAGE_OUTPUT_FILE"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No triage output file found." >> "$GITHUB_STEP_SUMMARY"
-          fi
+            else
+              echo "No triage output was produced."
+              echo ""
+              echo "The triage log file was either not created or is empty."
+              echo "Check the 'Run triage' step logs for details."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post triage completion
         if: ${{ always() && (steps.triage.outcome == 'success' || steps.triage.outcome == 'failure') && env.SLACK_BOT_TOKEN != '' && env.SLACK_CHANNEL != '' && env.SLACK_THREAD_TS != '' }}
