@@ -164,17 +164,20 @@ func (h *triageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, h.maxBodyLen))
 	if err != nil {
+		log.Printf("read request body: %v", err)
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
 
 	if err := h.verifyRequest(r, body); err != nil {
+		log.Printf("verify slack request: %v", err)
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
 	var envelope slackEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
+		log.Printf("decode slack payload: %v", err)
 		http.Error(w, "decode slack payload", http.StatusBadRequest)
 		return
 	}
@@ -184,6 +187,7 @@ func (h *triageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"challenge": envelope.Challenge})
 	case slackEventTypeCallback:
 		if err := h.handleEvent(r.Context(), envelope.Event); err != nil {
+			log.Printf("process slack event: %v", err)
 			http.Error(w, "process slack event", http.StatusInternalServerError)
 			return
 		}
@@ -328,14 +332,14 @@ func (c *slackHTTPClient) FetchParentMessage(ctx context.Context, channel, threa
 	query.Set("limit", "1")
 	endpoint.RawQuery = query.Encode()
 
+	//nolint:gosec // Slack API base URL is operator-configured.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("build slack conversations.replies request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
-	//nolint:gosec // Slack API base URL is operator-configured.
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) //nolint:gosec // taint tracked from operator-configured base URL above
 	if err != nil {
 		return "", fmt.Errorf("call slack conversations.replies: %w", err)
 	}
@@ -404,6 +408,7 @@ func (d *githubHTTPDispatcher) DispatchRepositoryEvent(ctx context.Context, payl
 	}
 
 	endpoint := fmt.Sprintf("%s/repos/%s/dispatches", d.baseURL, d.repository)
+	//nolint:gosec // GitHub API base URL and repository are operator-configured.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build github dispatch request: %w", err)
@@ -412,8 +417,7 @@ func (d *githubHTTPDispatcher) DispatchRepositoryEvent(ctx context.Context, payl
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
 
-	//nolint:gosec // GitHub API base URL and repository are operator-configured.
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Do(req) //nolint:gosec // taint tracked from operator-configured base URL above
 	if err != nil {
 		return fmt.Errorf("call github dispatch endpoint: %w", err)
 	}

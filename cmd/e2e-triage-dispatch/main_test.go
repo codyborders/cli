@@ -76,7 +76,7 @@ func TestHandler_RejectsBadSignature(t *testing.T) {
 	t.Parallel()
 
 	handler := newTestHandler(t)
-	req := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(`{"type":"event_callback"}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/slack/events", strings.NewReader(`{"type":"event_callback"}`))
 	req.Header.Set("X-Slack-Request-Timestamp", strconv.FormatInt(fixedNow().Unix(), 10))
 	req.Header.Set("X-Slack-Signature", "v0=deadbeef")
 
@@ -285,7 +285,7 @@ func fixedNow() time.Time {
 func signedRequest(t *testing.T, body string, now time.Time) *http.Request {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/slack/events", strings.NewReader(body))
 	timestamp := strconv.FormatInt(now.Unix(), 10)
 	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
 	req.Header.Set("X-Slack-Signature", slackSignature(testSigningSecret, timestamp, body))
