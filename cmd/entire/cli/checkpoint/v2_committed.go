@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
@@ -199,6 +202,90 @@ func (s *V2GitStore) writeContentHash(opts WriteCommittedOptions, sessionPath st
 		Hash: hashBlob,
 	}
 	filePaths.ContentHash = "/" + sessionPath + paths.ContentHashFileName
+
+	return nil
+}
+
+// writeCommittedFullTranscript writes the raw transcript to the /full/current ref.
+// Each write replaces the entire tree — /full/current only ever contains the
+// transcript for the most recently written checkpoint. Older transcripts are
+// discarded; generation rotation (future work) will archive them before replacement.
+//
+// sessionIndex is the session slot (0-based), determined by the caller to stay
+// consistent with the /main ref's session numbering.
+// This is a no-op if opts.Transcript is empty (and opts.TranscriptPath is unset).
+func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts WriteCommittedOptions, sessionIndex int) error { //nolint:unparam // sessionIndex will vary once WriteCommitted orchestrates both refs
+	transcript := opts.Transcript
+	if len(transcript) == 0 && opts.TranscriptPath != "" {
+		var readErr error
+		transcript, readErr = os.ReadFile(opts.TranscriptPath)
+		if readErr != nil {
+			transcript = nil
+		}
+	}
+	if len(transcript) == 0 {
+		return nil // No transcript to write
+	}
+
+	if err := validateWriteOpts(opts); err != nil {
+		return err
+	}
+
+	refName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
+	if err := s.ensureRef(refName); err != nil {
+		return fmt.Errorf("failed to ensure /full/current ref: %w", err)
+	}
+
+	parentHash, _, err := s.getRefState(refName)
+	if err != nil {
+		return err
+	}
+
+	// Build a fresh tree with only this checkpoint's transcript (no accumulation).
+	basePath := opts.CheckpointID.Path() + "/"
+	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
+
+	entries := make(map[string]object.TreeEntry)
+	if err := s.writeTranscriptBlobs(ctx, transcript, opts.Agent, sessionPath, entries); err != nil {
+		return err
+	}
+
+	newTreeHash, err := BuildTreeFromEntries(s.repo, entries)
+	if err != nil {
+		return fmt.Errorf("failed to build /full/current tree: %w", err)
+	}
+
+	commitMsg := fmt.Sprintf("Checkpoint: %s\n", opts.CheckpointID)
+	return s.updateRef(refName, newTreeHash, parentHash, commitMsg, opts.AuthorName, opts.AuthorEmail)
+}
+
+// writeTranscriptBlobs writes redacted, chunked transcript blobs to entries.
+// Unlike GitStore.writeTranscript, this does NOT write content_hash.txt — that
+// belongs on the /main ref.
+func (s *V2GitStore) writeTranscriptBlobs(ctx context.Context, transcript []byte, agentType types.AgentType, sessionPath string, entries map[string]object.TreeEntry) error {
+	// Redact secrets before chunking
+	redacted, err := redact.JSONLBytes(transcript)
+	if err != nil {
+		return fmt.Errorf("failed to redact transcript: %w", err)
+	}
+
+	chunks, err := agent.ChunkTranscript(ctx, redacted, agentType)
+	if err != nil {
+		return fmt.Errorf("failed to chunk transcript: %w", err)
+	}
+
+	for i, chunk := range chunks {
+		chunkPath := sessionPath + agent.ChunkFileName(paths.TranscriptFileName, i)
+		blobHash, err := CreateBlobFromContent(s.repo, chunk)
+		if err != nil {
+			return err
+		}
+		entries[chunkPath] = object.TreeEntry{
+			Name: chunkPath,
+			Mode: filemode.Regular,
+			Hash: blobHash,
+		}
+	}
 
 	return nil
 }

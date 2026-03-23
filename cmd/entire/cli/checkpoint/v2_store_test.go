@@ -376,3 +376,151 @@ func TestV2GitStore_WriteCommittedMain_MultiSession(t *testing.T) {
 	_ = v2ReadFile(t, tree, cpPath+"/0/"+paths.MetadataFileName)
 	_ = v2ReadFile(t, tree, cpPath+"/1/"+paths.MetadataFileName)
 }
+
+// v2FullTree returns the root tree from the /full/current ref for test assertions.
+func v2FullTree(t *testing.T, repo *git.Repository) *object.Tree {
+	t.Helper()
+	ref, err := repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	require.NoError(t, err)
+	commit, err := repo.CommitObject(ref.Hash())
+	require.NoError(t, err)
+	tree, err := commit.Tree()
+	require.NoError(t, err)
+	return tree
+}
+
+func TestV2GitStore_WriteCommittedFull_WritesTranscript(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("f1a2b3c4d5e6")
+	transcript := []byte(`{"type":"human","message":"hello"}` + "\n" + `{"type":"assistant","message":"hi"}`)
+
+	err := store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
+		CheckpointID: cpID,
+		SessionID:    "test-session-full-001",
+		Strategy:     "manual-commit",
+		Transcript:   transcript,
+		Agent:        agent.AgentTypeClaudeCode,
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	}, 0)
+	require.NoError(t, err)
+
+	tree := v2FullTree(t, repo)
+	cpPath := cpID.Path()
+
+	// Transcript should exist at session subdirectory 0/
+	content := v2ReadFile(t, tree, cpPath+"/0/"+paths.TranscriptFileName)
+	assert.Contains(t, content, `"type":"human"`)
+	assert.Contains(t, content, `"type":"assistant"`)
+}
+
+func TestV2GitStore_WriteCommittedFull_ExcludesMetadata(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("a2b3c4d5e6f1")
+	err := store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
+		CheckpointID: cpID,
+		SessionID:    "test-session-full-002",
+		Strategy:     "manual-commit",
+		Transcript:   []byte(`{"line":"one"}`),
+		Prompts:      []string{"hello"},
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	}, 0)
+	require.NoError(t, err)
+
+	tree := v2FullTree(t, repo)
+	cpPath := cpID.Path()
+
+	cpTree, err := tree.Tree(cpPath)
+	require.NoError(t, err)
+
+	sessionTree, err := cpTree.Tree("0")
+	require.NoError(t, err)
+
+	for _, entry := range sessionTree.Entries {
+		assert.NotEqual(t, paths.MetadataFileName, entry.Name,
+			"metadata.json must not be on /full/current ref")
+		assert.NotEqual(t, paths.PromptFileName, entry.Name,
+			"prompt.txt must not be on /full/current ref")
+		assert.NotEqual(t, paths.ContentHashFileName, entry.Name,
+			"content_hash.txt must not be on /full/current ref")
+	}
+}
+
+func TestV2GitStore_WriteCommittedFull_NoTranscript_Noop(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("b3c4d5e6f1a2")
+	err := store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
+		CheckpointID: cpID,
+		SessionID:    "test-session-full-003",
+		Strategy:     "manual-commit",
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	}, 0)
+	require.NoError(t, err)
+
+	// /full/current ref should either not exist or have an empty tree
+	ref, err := repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	if err == nil {
+		commit, cErr := repo.CommitObject(ref.Hash())
+		require.NoError(t, cErr)
+		tree, tErr := commit.Tree()
+		require.NoError(t, tErr)
+		assert.Empty(t, tree.Entries, "empty transcript should produce no entries")
+	}
+	// If ref doesn't exist at all, that's also acceptable for a no-op
+}
+
+func TestV2GitStore_WriteCommittedFullTranscript_ReplacesOnNewCheckpoint(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	cpA := id.MustCheckpointID("c4d5e6f1a2b3")
+	cpB := id.MustCheckpointID("d5e6f1a2b3c4")
+
+	// Write checkpoint A
+	err := store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
+		CheckpointID: cpA,
+		SessionID:    "session-A",
+		Strategy:     "manual-commit",
+		Transcript:   []byte(`{"from":"A"}`),
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	}, 0)
+	require.NoError(t, err)
+
+	// Write checkpoint B — should replace A entirely
+	err = store.writeCommittedFullTranscript(ctx, WriteCommittedOptions{
+		CheckpointID: cpB,
+		SessionID:    "session-B",
+		Strategy:     "manual-commit",
+		Transcript:   []byte(`{"from":"B"}`),
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.com",
+	}, 0)
+	require.NoError(t, err)
+
+	tree := v2FullTree(t, repo)
+
+	// Checkpoint B should be present
+	contentB := v2ReadFile(t, tree, cpB.Path()+"/0/"+paths.TranscriptFileName)
+	assert.Contains(t, contentB, `"from":"B"`)
+
+	// Checkpoint A should NOT be present — replaced by B
+	_, err = tree.Tree(cpA.Path())
+	assert.Error(t, err, "checkpoint A should not exist after checkpoint B replaced it")
+}
