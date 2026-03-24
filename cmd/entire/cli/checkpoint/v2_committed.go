@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
@@ -23,8 +25,8 @@ import (
 )
 
 // WriteCommitted writes a committed checkpoint to both v2 refs:
-//   - /main: metadata, prompts, content hash (no raw transcript)
-//   - /full/current: raw transcript only (replaces previous content)
+//   - /main: metadata and prompts (no raw transcript or content hash)
+//   - /full/current: raw transcript + content hash (replaces previous content)
 //
 // This is the public entry point for v2 dual-writes. The session index is
 // determined from the /main ref and passed to the /full/current write to
@@ -105,6 +107,11 @@ func (s *V2GitStore) updateCommittedMain(ctx context.Context, opts UpdateCommitt
 	if sessionIndex >= len(summary.Sessions) {
 		// findSessionIndex returns next-available when not found; fall back to latest
 		sessionIndex = len(summary.Sessions) - 1
+		logging.Debug(ctx, "v2 UpdateCommitted: session ID not found, falling back to latest",
+			slog.String("session_id", opts.SessionID),
+			slog.String("checkpoint_id", string(opts.CheckpointID)),
+			slog.Int("fallback_index", sessionIndex),
+		)
 	}
 
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
@@ -174,8 +181,8 @@ func (s *V2GitStore) updateCommittedFullTranscript(ctx context.Context, opts Upd
 }
 
 // writeCommittedMain writes metadata entries to the /main ref.
-// This includes session metadata, prompts, and content hash — but NOT the
-// raw transcript (full.jsonl), which goes to /full/current.
+// This includes session metadata and prompts — but NOT the raw transcript
+// (full.jsonl) or content hash (content_hash.txt), which go to /full/current.
 // Returns the session index used, so the caller can pass it to writeCommittedFullTranscript.
 func (s *V2GitStore) writeCommittedMain(ctx context.Context, opts WriteCommittedOptions) (int, error) {
 	if err := validateWriteOpts(opts); err != nil {
@@ -201,7 +208,7 @@ func (s *V2GitStore) writeCommittedMain(ctx context.Context, opts WriteCommitted
 		return 0, err
 	}
 
-	// Build main session entries (metadata, prompts, content hash — no transcript)
+	// Build main session entries (metadata, prompts — no transcript or content hash)
 	sessionIndex, err := s.writeMainCheckpointEntries(ctx, opts, basePath, entries)
 	if err != nil {
 		return 0, err
@@ -437,6 +444,8 @@ func (s *V2GitStore) writeTranscriptBlobs(ctx context.Context, transcript []byte
 }
 
 // validateWriteOpts validates identifiers in WriteCommittedOptions.
+// Used by both GitStore (v1) and V2GitStore — lives here alongside the v2 code
+// but is a package-level function accessible to all stores in this package.
 func validateWriteOpts(opts WriteCommittedOptions) error {
 	if opts.CheckpointID.IsEmpty() {
 		return errors.New("invalid checkpoint options: checkpoint ID is required")

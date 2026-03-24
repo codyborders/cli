@@ -2295,7 +2295,7 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 		}
 
 		// Dual-write: update v2 refs when enabled
-		updateCommittedV2IfEnabled(ctx, repo, updateOpts)
+		updateCommittedV2IfEnabled(logCtx, repo, updateOpts)
 
 		logging.Info(logCtx, "finalize: checkpoint updated with full transcript",
 			slog.String("checkpoint_id", cpIDStr),
