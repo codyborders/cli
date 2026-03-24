@@ -103,11 +103,9 @@ func DiscoverAndRegister(ctx context.Context) {
 // file name so that the agent name derived from the binary matches on all platforms.
 // On Unix this is effectively a no-op because binaries have no extension.
 func stripExeExt(name string) string {
-	lower := strings.ToLower(name)
-	for _, ext := range []string{".exe", ".bat", ".cmd"} {
-		if strings.HasSuffix(lower, ext) {
-			return name[:len(name)-len(ext)]
-		}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".exe", ".bat", ".cmd":
+		return strings.TrimSuffix(name, filepath.Ext(name))
 	}
 	return name
 }
