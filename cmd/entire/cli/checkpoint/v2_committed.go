@@ -444,8 +444,6 @@ func (s *V2GitStore) writeTranscriptBlobs(ctx context.Context, transcript []byte
 }
 
 // validateWriteOpts validates identifiers in WriteCommittedOptions.
-// Used by both GitStore (v1) and V2GitStore — lives here alongside the v2 code
-// but is a package-level function accessible to all stores in this package.
 func validateWriteOpts(opts WriteCommittedOptions) error {
 	if opts.CheckpointID.IsEmpty() {
 		return errors.New("invalid checkpoint options: checkpoint ID is required")
