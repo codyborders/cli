@@ -752,7 +752,7 @@ func warnStaleEndedSessionsTo(ctx context.Context, count int, w io.Writer) {
 		}
 	}
 	//nolint:errcheck,gosec // G104: Best-effort warning — fail-open if file ops fail
-	os.MkdirAll(warnDir, 0o755)
+	os.MkdirAll(warnDir, 0o750)
 	//nolint:errcheck,gosec // G104: Best-effort sentinel file write
 	os.WriteFile(warnFile, []byte{}, 0o644)
 	fmt.Fprintf(w,
