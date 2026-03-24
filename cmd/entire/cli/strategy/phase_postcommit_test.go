@@ -3,7 +3,6 @@ package strategy
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1388,12 +1387,9 @@ func setupSessionWithCheckpoint(t *testing.T, s *ManualCommitStrategy, _ *git.Re
 	metadataDirAbs := filepath.Join(dir, metadataDir)
 	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
 
-	transcript := `{"type":"human","message":{"content":"test prompt"}}
-{"type":"assistant","message":{"content":"test response"}}
-`
 	require.NoError(t, os.WriteFile(
 		filepath.Join(metadataDirAbs, paths.TranscriptFileName),
-		[]byte(transcript), 0o644))
+		[]byte(testTranscript), 0o644))
 
 	// SaveStep creates the shadow branch and checkpoint
 	// Include test.txt as a modified file so it's saved to the shadow branch
@@ -1425,12 +1421,9 @@ func setupSessionWithCheckpointAndFile(t *testing.T, s *ManualCommitStrategy, di
 	metadataDirAbs := filepath.Join(dir, metadataDir)
 	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
 
-	transcript := `{"type":"human","message":{"content":"test prompt"}}
-{"type":"assistant","message":{"content":"test response"}}
-`
 	require.NoError(t, os.WriteFile(
 		filepath.Join(metadataDirAbs, paths.TranscriptFileName),
-		[]byte(transcript), 0o644))
+		[]byte(testTranscript), 0o644))
 
 	err := s.SaveStep(context.Background(), StepContext{
 		SessionID:      sessionID,
@@ -2430,6 +2423,7 @@ func TestPostCommit_ActiveSession_DifferentFilesThanCommit_ShouldCondense(t *tes
 
 // TestCountWarnableStaleEndedSessions verifies that the warning only counts the
 // same ENDED sessions that 'entire doctor' can actually condense.
+// Uses t.Chdir — do NOT add t.Parallel().
 func TestCountWarnableStaleEndedSessions(t *testing.T) {
 	dir := setupGitRepo(t)
 	t.Chdir(dir)
@@ -2488,6 +2482,7 @@ func TestCountWarnableStaleEndedSessions(t *testing.T) {
 // TestPostCommit_WarnStaleEndedSessions_AfterProcessing verifies that the
 // warning is emitted only for sessions that remain stale AFTER the current
 // commit is processed.
+// Uses t.Chdir — do NOT add t.Parallel().
 func TestPostCommit_WarnStaleEndedSessions_AfterProcessing(t *testing.T) {
 	dir := setupGitRepo(t)
 	t.Chdir(dir)
@@ -2496,45 +2491,44 @@ func TestPostCommit_WarnStaleEndedSessions_AfterProcessing(t *testing.T) {
 	require.NoError(t, err)
 
 	s := &ManualCommitStrategy{}
-	sessionFiles := map[string]string{
-		"ended-a": "stale-a.txt",
-		"ended-b": "stale-b.txt",
-		"ended-c": "stale-c.txt",
+	type sessionFile struct {
+		sessionID string
+		fileName  string
+	}
+	sessionFiles := []sessionFile{
+		{"ended-a", "stale-a.txt"},
+		{"ended-b", "stale-b.txt"},
+		{"ended-c", "stale-c.txt"},
 	}
 
 	filesToCommit := make([]string, 0, len(sessionFiles))
-	for sessionID, fileName := range sessionFiles {
-		setupSessionWithCheckpointAndFile(t, s, dir, sessionID, fileName)
+	for _, sf := range sessionFiles {
+		setupSessionWithCheckpointAndFile(t, s, dir, sf.sessionID, sf.fileName)
 
-		state, loadErr := s.loadSessionState(context.Background(), sessionID)
+		state, loadErr := s.loadSessionState(context.Background(), sf.sessionID)
 		require.NoError(t, loadErr)
 		now := time.Now()
 		state.Phase = session.PhaseEnded
 		state.EndedAt = &now
-		state.FilesTouched = []string{fileName}
+		state.FilesTouched = []string{sf.fileName}
 		require.NoError(t, s.saveSessionState(context.Background(), state))
 
-		filesToCommit = append(filesToCommit, fileName)
+		filesToCommit = append(filesToCommit, sf.fileName)
 	}
 
 	commitFilesWithTrailer(t, repo, dir, "abc123def456", filesToCommit...)
 
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stderr = w
-	defer func() {
-		os.Stderr = oldStderr
-	}()
+	// Capture warning output via the injectable stderrWriter instead of
+	// mutating the process-global os.Stderr.
+	var buf bytes.Buffer
+	oldWriter := stderrWriter
+	stderrWriter = &buf
+	defer func() { stderrWriter = oldWriter }()
 
 	err = s.PostCommit(context.Background())
 	require.NoError(t, err)
 
-	require.NoError(t, w.Close())
-	stderr, err := io.ReadAll(r)
-	require.NoError(t, err)
-
-	assert.NotContains(t, string(stderr), "entire doctor",
+	assert.NotContains(t, buf.String(), "entire doctor",
 		"warning should be suppressed when this commit already condensed the stale ended sessions")
 }
 

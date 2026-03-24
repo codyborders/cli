@@ -728,10 +728,15 @@ const (
 	staleEndedSessionWarnFile      = ".warn-stale-ended" // sentinel file name in entire-sessions/
 )
 
+// stderrWriter is the destination for user-facing warnings emitted outside of
+// Cobra command output (e.g. from PostCommit). Tests can swap this to capture
+// output without mutating the process-global os.Stderr.
+var stderrWriter io.Writer = os.Stderr
+
 // warnStaleEndedSessions emits a rate-limited warning to stderr when too many
 // non-FullyCondensed ENDED sessions are accumulating.
 func warnStaleEndedSessions(ctx context.Context, count int) {
-	warnStaleEndedSessionsTo(ctx, count, os.Stderr)
+	warnStaleEndedSessionsTo(ctx, count, stderrWriter)
 }
 
 func warnStaleEndedSessionsTo(ctx context.Context, count int, w io.Writer) {

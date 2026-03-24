@@ -109,6 +109,11 @@ func isWarnableStaleEndedSession(repo *git.Repository, state *SessionState) bool
 		return false
 	}
 
+	// Re-check shadow branch existence even though listAllSessionStates already
+	// filters orphaned sessions. This is intentional: PostCommit deletes shadow
+	// branches during condensation, so a branch that existed at list-load time
+	// may be gone by the time we reach the warning check. Without this re-check
+	// we would warn about sessions that this commit just cleaned up.
 	shadowBranch := getShadowBranchNameForCommit(state.BaseCommit, state.WorktreeID)
 	refName := plumbing.NewBranchReferenceName(shadowBranch)
 	_, err := repo.Reference(refName, true)
