@@ -29,8 +29,6 @@ func TestReadGeneration_EmptyTree_ReturnsDefault(t *testing.T) {
 	gen, err := store.readGeneration(emptyTree)
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, gen.Generation)
-	assert.Equal(t, 0, gen.CheckpointCount)
 	assert.Empty(t, gen.Checkpoints)
 	assert.True(t, gen.OldestCheckpointAt.IsZero())
 	assert.True(t, gen.NewestCheckpointAt.IsZero())
@@ -43,8 +41,6 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
-		Generation:         1,
-		CheckpointCount:    2,
 		Checkpoints:        []string{"aabbccddeeff", "112233445566"},
 		OldestCheckpointAt: now.Add(-1 * time.Hour),
 		NewestCheckpointAt: now,
@@ -61,8 +57,6 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 	gen, err := store.readGeneration(treeHash)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, gen.Generation)
-	assert.Equal(t, 2, gen.CheckpointCount)
 	assert.Equal(t, []string{"aabbccddeeff", "112233445566"}, gen.Checkpoints)
 	assert.True(t, gen.OldestCheckpointAt.Equal(now.Add(-1*time.Hour)))
 	assert.True(t, gen.NewestCheckpointAt.Equal(now))
@@ -75,8 +69,6 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 
 	now := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
-		Generation:         0,
-		CheckpointCount:    1,
 		Checkpoints:        []string{"aabbccddeeff"},
 		OldestCheckpointAt: now,
 		NewestCheckpointAt: now,
@@ -96,8 +88,6 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 	gen, err := store.readGeneration(treeHash)
 	require.NoError(t, err)
 
-	assert.Equal(t, original.Generation, gen.Generation)
-	assert.Equal(t, original.CheckpointCount, gen.CheckpointCount)
 	assert.Equal(t, original.Checkpoints, gen.Checkpoints)
 }
 
@@ -109,8 +99,6 @@ func TestReadGenerationFromRef(t *testing.T) {
 	// Create a ref with generation.json in its tree
 	now := time.Date(2026, 3, 25, 14, 0, 0, 0, time.UTC)
 	gen := GenerationMetadata{
-		Generation:         0,
-		CheckpointCount:    1,
 		Checkpoints:        []string{"aabbccddeeff"},
 		OldestCheckpointAt: now,
 		NewestCheckpointAt: now,
@@ -131,8 +119,6 @@ func TestReadGenerationFromRef(t *testing.T) {
 	result, err := store.readGenerationFromRef(refName)
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, result.Generation)
-	assert.Equal(t, 1, result.CheckpointCount)
 	assert.Equal(t, []string{"aabbccddeeff"}, result.Checkpoints)
 }
 
@@ -152,9 +138,7 @@ func TestAddGenerationToRootTree(t *testing.T) {
 	require.NoError(t, err)
 
 	gen := GenerationMetadata{
-		Generation:      0,
-		CheckpointCount: 1,
-		Checkpoints:     []string{"aabbccddeeff"},
+		Checkpoints: []string{"aabbccddeeff"},
 	}
 
 	// Add generation.json to the root tree
@@ -165,7 +149,7 @@ func TestAddGenerationToRootTree(t *testing.T) {
 	// Verify generation.json is present and shard dir is preserved
 	readGen, err := store.readGeneration(newRootHash)
 	require.NoError(t, err)
-	assert.Equal(t, 1, readGen.CheckpointCount)
+	assert.Len(t, readGen.Checkpoints, 1)
 
 	// Verify the shard directory still exists in the tree
 	tree, err := repo.TreeObject(newRootHash)
@@ -207,8 +191,7 @@ func TestWriteCommittedFull_UpdatesGenerationJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	gen := v2FullGeneration(t, repo)
-	assert.Equal(t, 0, gen.Generation, "active generation should be 0")
-	assert.Equal(t, 1, gen.CheckpointCount)
+	assert.Len(t, gen.Checkpoints, 1)
 	assert.Equal(t, []string{cpID.String()}, gen.Checkpoints)
 	assert.False(t, gen.OldestCheckpointAt.IsZero())
 	assert.False(t, gen.NewestCheckpointAt.IsZero())
@@ -246,7 +229,7 @@ func TestWriteCommittedFull_AccumulatesInGenerationJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	gen := v2FullGeneration(t, repo)
-	assert.Equal(t, 2, gen.CheckpointCount)
+	assert.Len(t, gen.Checkpoints, 2)
 	assert.Equal(t, []string{cpA.String(), cpB.String()}, gen.Checkpoints)
 	assert.True(t, gen.NewestCheckpointAt.After(gen.OldestCheckpointAt) || gen.NewestCheckpointAt.Equal(gen.OldestCheckpointAt))
 }
@@ -273,7 +256,7 @@ func TestUpdateCommitted_DoesNotUpdateGenerationJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	genBefore := v2FullGeneration(t, repo)
-	require.Equal(t, 1, genBefore.CheckpointCount)
+	require.Len(t, genBefore.Checkpoints, 1)
 
 	// Update (stop-time finalization) — should NOT change generation.json
 	err = store.UpdateCommitted(ctx, UpdateCommittedOptions{
@@ -286,7 +269,7 @@ func TestUpdateCommitted_DoesNotUpdateGenerationJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	genAfter := v2FullGeneration(t, repo)
-	assert.Equal(t, 1, genAfter.CheckpointCount, "UpdateCommitted should not change checkpoint count")
+	assert.Len(t, genAfter.Checkpoints, 1, "UpdateCommitted should not change checkpoint count")
 	assert.Equal(t, genBefore.Checkpoints, genAfter.Checkpoints)
 
 	// Verify the transcript was actually updated (sanity check)
@@ -319,7 +302,7 @@ func TestWriteCommittedFull_GenerationJSON_SameCheckpointIdNotDuplicated(t *test
 
 	gen := v2FullGeneration(t, repo)
 	// Same checkpoint ID written twice should only appear once in the array
-	assert.Equal(t, 1, gen.CheckpointCount)
+	assert.Len(t, gen.Checkpoints, 1)
 	assert.Equal(t, []string{cpID.String()}, gen.Checkpoints)
 }
 
@@ -346,7 +329,7 @@ func TestWriteCommittedFull_GenerationJSON_PreservedInTree(t *testing.T) {
 	genContent := v2ReadFile(t, fullTree, paths.GenerationFileName)
 	var gen GenerationMetadata
 	require.NoError(t, json.Unmarshal([]byte(genContent), &gen))
-	assert.Equal(t, 1, gen.CheckpointCount)
+	assert.Len(t, gen.Checkpoints, 1)
 
 	// Verify checkpoint data is also present
 	content := v2ReadFile(t, fullTree, cpID.Path()+"/0/"+paths.TranscriptFileName)
@@ -360,9 +343,7 @@ func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
 
 	// Build a minimal tree with just generation.json
 	gen := GenerationMetadata{
-		Generation:      number,
-		CheckpointCount: 1,
-		Checkpoints:     []string{"dummy000000"},
+		Checkpoints: []string{"dummy000000"},
 	}
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, store.writeGeneration(gen, entries))
@@ -437,4 +418,113 @@ func TestNextGenerationNumber_WithExisting(t *testing.T) {
 	next, err := store.nextGenerationNumber()
 	require.NoError(t, err)
 	assert.Equal(t, 3, next)
+}
+
+// populateFullCurrent writes N checkpoints to /full/current via WriteCommitted.
+func populateFullCurrent(t *testing.T, store *V2GitStore, n int) []id.CheckpointID {
+	t.Helper()
+	ctx := context.Background()
+	cpIDs := make([]id.CheckpointID, n)
+	for i := range n {
+		cpIDs[i] = id.MustCheckpointID(fmt.Sprintf("%012x", i+1))
+		err := store.WriteCommitted(ctx, WriteCommittedOptions{
+			CheckpointID: cpIDs[i],
+			SessionID:    fmt.Sprintf("session-rot-%d", i),
+			Strategy:     "manual-commit",
+			Agent:        agent.AgentTypeClaudeCode,
+			Transcript:   []byte(fmt.Sprintf(`{"cp":%d}`, i)),
+			AuthorName:   "Test",
+			AuthorEmail:  "test@test.com",
+		})
+		require.NoError(t, err)
+	}
+	return cpIDs
+}
+
+func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	// Write 3 checkpoints to /full/current
+	cpIDs := populateFullCurrent(t, store, 3)
+
+	// Verify pre-rotation state
+	genBefore := v2FullGeneration(t, repo)
+	require.Len(t, genBefore.Checkpoints, 3)
+
+	// Rotate
+	require.NoError(t, store.rotateGeneration(ctx))
+
+	// --- Verify archived ref ---
+	archiveRefName := fmt.Sprintf("%s%013d", paths.V2FullRefPrefix, 1)
+	archiveRef, err := repo.Reference(plumbing.ReferenceName(archiveRefName), true)
+	require.NoError(t, err, "archived ref should exist")
+
+	// Archived ref should contain all 3 checkpoints
+	archiveCommit, err := repo.CommitObject(archiveRef.Hash())
+	require.NoError(t, err)
+	archiveGen, err := store.readGeneration(archiveCommit.TreeHash)
+	require.NoError(t, err)
+	assert.Len(t, archiveGen.Checkpoints, 3)
+	for i, cpID := range cpIDs {
+		assert.Equal(t, cpID.String(), archiveGen.Checkpoints[i])
+	}
+
+	// Archived tree should contain the checkpoint data
+	archiveTree, err := archiveCommit.Tree()
+	require.NoError(t, err)
+	for _, cpID := range cpIDs {
+		_, treeErr := archiveTree.File(cpID.Path() + "/0/" + paths.TranscriptFileName)
+		assert.NoError(t, treeErr, "archived tree should contain transcript for %s", cpID)
+	}
+
+	// --- Verify fresh /full/current ---
+	fullRef, err := repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	require.NoError(t, err)
+	freshCommit, err := repo.CommitObject(fullRef.Hash())
+	require.NoError(t, err)
+
+	// Fresh commit should be an orphan (no parents)
+	assert.Empty(t, freshCommit.ParentHashes, "fresh /full/current should be an orphan commit")
+
+	// Fresh tree should contain only generation.json (no shard directories)
+	freshTree, err := freshCommit.Tree()
+	require.NoError(t, err)
+	assert.Len(t, freshTree.Entries, 1, "fresh tree should contain only generation.json")
+	assert.Equal(t, paths.GenerationFileName, freshTree.Entries[0].Name)
+
+	// Seed generation.json should have empty checkpoints
+	freshGen, err := store.readGeneration(freshCommit.TreeHash)
+	require.NoError(t, err)
+	assert.Empty(t, freshGen.Checkpoints)
+}
+
+func TestRotateGeneration_SequentialNumbering(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo)
+	ctx := context.Background()
+
+	// First rotation: populate and rotate
+	populateFullCurrent(t, store, 2)
+	require.NoError(t, store.rotateGeneration(ctx))
+
+	// Second rotation: populate again and rotate
+	populateFullCurrent(t, store, 2)
+	require.NoError(t, store.rotateGeneration(ctx))
+
+	// Verify both archived refs exist with correct generation numbers
+	archived, err := store.listArchivedGenerations()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0000000000001", "0000000000002"}, archived)
+
+	// Verify each archived ref has checkpoints
+	for _, name := range archived {
+		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + name)
+		gen, readErr := store.readGenerationFromRef(refName)
+		require.NoError(t, readErr)
+		assert.Len(t, gen.Checkpoints, 2, "archive %s should have 2 checkpoints", name)
+	}
 }

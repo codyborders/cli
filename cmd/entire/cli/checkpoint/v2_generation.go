@@ -1,8 +1,10 @@
 package checkpoint
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
@@ -25,18 +28,14 @@ const DefaultMaxCheckpointsPerGeneration = 100
 // Stored at the tree root as generation.json and updated on every WriteCommitted.
 // UpdateCommitted (stop-time finalization) does NOT update this file since it
 // replaces an existing transcript rather than adding a new checkpoint.
+//
+// The generation's sequence number is derived from the ref name (e.g.,
+// refs/entire/checkpoints/v2/full/0000000000001 → generation 1), not stored
+// in this struct. The checkpoint count is len(Checkpoints).
 type GenerationMetadata struct {
-	// Generation is the sequence number (0 for /full/current, 1+ for archived).
-	Generation int `json:"generation"`
-
-	// CheckpointCount is the number of checkpoints in this generation.
-	// Matches len(Checkpoints). Present per spec for quick reads by the
-	// cleanup tool without parsing the full Checkpoints array.
-	CheckpointCount int `json:"checkpoint_count"`
-
 	// Checkpoints is the list of checkpoint IDs stored in this generation.
 	// Used for finding which generation holds a specific checkpoint
-	// without walking the tree.
+	// without walking the tree. len(Checkpoints) gives the count.
 	Checkpoints []string `json:"checkpoints"`
 
 	// OldestCheckpointAt is the creation time of the earliest checkpoint.
@@ -87,10 +86,7 @@ func (s *V2GitStore) readGenerationFromRef(refName plumbing.ReferenceName) (Gene
 }
 
 // writeGeneration marshals gen as generation.json and adds the blob entry to entries.
-// Always syncs CheckpointCount = len(Checkpoints) before marshaling.
 func (s *V2GitStore) writeGeneration(gen GenerationMetadata, entries map[string]object.TreeEntry) error {
-	gen.CheckpointCount = len(gen.Checkpoints)
-
 	data, err := jsonutil.MarshalIndentWithNewline(gen, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal %s: %w", paths.GenerationFileName, err)
@@ -132,7 +128,6 @@ func (s *V2GitStore) updateGenerationForWrite(rootTreeHash plumbing.Hash, checkp
 	}
 	if !found {
 		gen.Checkpoints = append(gen.Checkpoints, cpStr)
-		gen.CheckpointCount = len(gen.Checkpoints)
 	}
 
 	gen.NewestCheckpointAt = now
@@ -146,8 +141,6 @@ func (s *V2GitStore) updateGenerationForWrite(rootTreeHash plumbing.Hash, checkp
 // addGenerationToRootTree adds generation.json to an existing root tree, returning
 // a new root tree hash. Preserves all existing entries (shard directories, etc.).
 func (s *V2GitStore) addGenerationToRootTree(rootTreeHash plumbing.Hash, gen GenerationMetadata) (plumbing.Hash, error) {
-	gen.CheckpointCount = len(gen.Checkpoints)
-
 	data, err := jsonutil.MarshalIndentWithNewline(gen, "", "  ")
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("failed to marshal %s: %w", paths.GenerationFileName, err)
@@ -213,4 +206,63 @@ func (s *V2GitStore) nextGenerationNumber() (int, error) {
 		return 0, fmt.Errorf("failed to parse archived generation number %q: %w", highest, err)
 	}
 	return n + 1, nil
+}
+
+// rotateGeneration archives the current /full/current generation and creates
+// a fresh orphan. This is a 3-phase operation:
+//
+//  1. Archive: determine the next generation number, create a new ref pointing
+//     to the current /full/current commit.
+//  2. Reset: create a fresh orphan commit with an empty tree + seed generation.json,
+//     point /full/current at it.
+func (s *V2GitStore) rotateGeneration(ctx context.Context) error {
+	refName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
+
+	currentRef, err := s.repo.Reference(refName, true)
+	if err != nil {
+		return fmt.Errorf("rotation: failed to read /full/current: %w", err)
+	}
+
+	archiveNumber, err := s.nextGenerationNumber()
+	if err != nil {
+		return fmt.Errorf("rotation: failed to determine next generation number: %w", err)
+	}
+
+	// Phase 1: Archive — create ref pointing to the current commit
+	archiveRefName := plumbing.ReferenceName(fmt.Sprintf("%s%0*d", paths.V2FullRefPrefix, generationRefWidth, archiveNumber))
+	archiveRef := plumbing.NewHashReference(archiveRefName, currentRef.Hash())
+	if err := s.repo.Storer.SetReference(archiveRef); err != nil {
+		return fmt.Errorf("rotation: failed to create archived ref %s: %w", archiveRefName, err)
+	}
+
+	// Phase 2: Create fresh orphan /full/current
+	seedGen := GenerationMetadata{
+		Checkpoints: []string{},
+	}
+	seedEntries := make(map[string]object.TreeEntry)
+	if err := s.writeGeneration(seedGen, seedEntries); err != nil {
+		return fmt.Errorf("rotation: failed to build seed generation: %w", err)
+	}
+	seedTreeHash, err := BuildTreeFromEntries(s.repo, seedEntries)
+	if err != nil {
+		return fmt.Errorf("rotation: failed to build seed tree: %w", err)
+	}
+
+	authorName, authorEmail := GetGitAuthorFromRepo(s.repo)
+	orphanCommitHash, err := CreateCommit(s.repo, seedTreeHash, plumbing.ZeroHash, "Start generation", authorName, authorEmail)
+	if err != nil {
+		return fmt.Errorf("rotation: failed to create orphan commit: %w", err)
+	}
+
+	orphanRef := plumbing.NewHashReference(refName, orphanCommitHash)
+	if err := s.repo.Storer.SetReference(orphanRef); err != nil {
+		return fmt.Errorf("rotation: failed to reset /full/current: %w", err)
+	}
+
+	logging.Info(ctx, "generation rotation complete",
+		slog.Int("archived_generation", archiveNumber),
+		slog.String("archive_ref", string(archiveRefName)),
+	)
+
+	return nil
 }
