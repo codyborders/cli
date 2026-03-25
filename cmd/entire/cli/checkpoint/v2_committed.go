@@ -281,10 +281,10 @@ func (s *V2GitStore) writeMainCheckpointEntries(ctx context.Context, opts WriteC
 	return sessionIndex, nil
 }
 
-// writeMainSessionToSubdirectory writes a single session's metadata, prompts, and
-// content hash to a session subdirectory (0/, 1/, 2/, … indexed by session order
-// within the checkpoint). Unlike the v1 equivalent, this does NOT write the raw
-// transcript (full.jsonl) — that goes to /full/current.
+// writeMainSessionToSubdirectory writes a single session's metadata and prompts
+// to a session subdirectory (0/, 1/, 2/, … indexed by session order within the
+// checkpoint). Unlike the v1 equivalent, this does NOT write the raw transcript
+// (full.jsonl) or content hash (content_hash.txt) — those go to /full/current.
 func (s *V2GitStore) writeMainSessionToSubdirectory(opts WriteCommittedOptions, sessionPath string, entries map[string]object.TreeEntry) (SessionFilePaths, error) {
 	filePaths := SessionFilePaths{}
 
@@ -326,7 +326,6 @@ func (s *V2GitStore) writeMainSessionToSubdirectory(opts WriteCommittedOptions, 
 		ToolUseID:                   opts.ToolUseID,
 		TranscriptIdentifierAtStart: opts.TranscriptIdentifierAtStart,
 		CheckpointTranscriptStart:   opts.CheckpointTranscriptStart,
-		TranscriptLinesAtStart:      opts.CheckpointTranscriptStart,
 		TokenUsage:                  opts.TokenUsage,
 		SessionMetrics:              opts.SessionMetrics,
 		InitialAttribution:          opts.InitialAttribution,
@@ -402,10 +401,17 @@ func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts Writ
 	checkpointPath := opts.CheckpointID.Path()
 	sessionPath := fmt.Sprintf("%s%d/", basePath, sessionIndex)
 
-	// Read existing entries at this checkpoint's shard path (accumulate, don't replace)
+	// Read existing entries at this checkpoint's shard path
 	entries, err := s.gs.flattenCheckpointEntries(rootTreeHash, checkpointPath)
 	if err != nil {
 		return err
+	}
+
+	// Clear existing entries at this session path before writing new ones
+	for key := range entries {
+		if strings.HasPrefix(key, sessionPath) {
+			delete(entries, key)
+		}
 	}
 
 	redactedTranscript, err := s.writeTranscriptBlobs(ctx, transcript, opts.Agent, sessionPath, entries)
