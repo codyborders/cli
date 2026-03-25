@@ -22,7 +22,7 @@ func testBinaryDir(t *testing.T, script string) string {
 	dir := t.TempDir()
 
 	name := "entire-agent-test"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		name += ".bat"
 	}
 

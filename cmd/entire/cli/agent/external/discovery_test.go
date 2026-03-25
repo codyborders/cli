@@ -285,7 +285,7 @@ func TestDiscoverAndRegister_SkipsInfoFailure(t *testing.T) {
 // binary is discovered and registered on Windows, with the file extension
 // stripped from the agent name. .cmd and .exe follow the same code path.
 func TestDiscoverAndRegister_RegistersBatOnWindows(t *testing.T) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != osWindows {
 		t.Skip("this test only applies on Windows")
 	}
 

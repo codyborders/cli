@@ -14,7 +14,10 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/settings"
 )
 
-const binaryPrefix = "entire-agent-"
+const (
+	binaryPrefix = "entire-agent-"
+	osWindows    = "windows"
+)
 
 // DiscoverAndRegister scans $PATH for executables matching "entire-agent-<name>",
 // calls their "info" subcommand, and registers them in the agent registry.
@@ -66,7 +69,7 @@ func DiscoverAndRegister(ctx context.Context) {
 				continue
 			}
 			// Check executable bit (on Unix; Windows doesn't set execute bits)
-			if runtime.GOOS != "windows" && finfo.Mode()&0o111 == 0 {
+			if runtime.GOOS != osWindows && finfo.Mode()&0o111 == 0 {
 				continue
 			}
 
