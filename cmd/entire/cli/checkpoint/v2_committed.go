@@ -441,7 +441,22 @@ func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts Writ
 	}
 
 	commitMsg := fmt.Sprintf("Checkpoint: %s\n", opts.CheckpointID)
-	return s.updateRef(refName, newTreeHash, parentHash, commitMsg, opts.AuthorName, opts.AuthorEmail)
+	if err := s.updateRef(refName, newTreeHash, parentHash, commitMsg, opts.AuthorName, opts.AuthorEmail); err != nil {
+		return err
+	}
+
+	// Check if rotation is needed after successful write.
+	if len(gen.Checkpoints) >= s.maxCheckpoints() {
+		if rotErr := s.rotateGeneration(ctx); rotErr != nil {
+			logging.Warn(ctx, "generation rotation failed",
+				slog.String("error", rotErr.Error()),
+				slog.Int("checkpoint_count", len(gen.Checkpoints)),
+			)
+			// Non-fatal: rotation failure doesn't invalidate the write
+		}
+	}
+
+	return nil
 }
 
 // writeTranscriptBlobs writes redacted, chunked transcript blobs to entries.
