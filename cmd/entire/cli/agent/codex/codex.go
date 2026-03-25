@@ -101,12 +101,19 @@ func (c *CodexAgent) ReadSession(input *agent.HookInput) (*agent.AgentSession, e
 		return nil, fmt.Errorf("failed to read transcript: %w", err)
 	}
 
+	// Extract modified files from the rollout transcript (best-effort).
+	var modifiedFiles []string
+	for _, lineData := range splitJSONL(data) {
+		modifiedFiles = append(modifiedFiles, extractFilesFromLine(lineData)...)
+	}
+
 	return &agent.AgentSession{
-		SessionID:  input.SessionID,
-		AgentName:  c.Name(),
-		SessionRef: input.SessionRef,
-		StartTime:  time.Now(),
-		NativeData: data,
+		SessionID:     input.SessionID,
+		AgentName:     c.Name(),
+		SessionRef:    input.SessionRef,
+		StartTime:     time.Now(),
+		NativeData:    data,
+		ModifiedFiles: modifiedFiles,
 	}, nil
 }
 
