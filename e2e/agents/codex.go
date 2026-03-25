@@ -180,13 +180,28 @@ func (c *Codex) StartSession(ctx context.Context, dir string) (Session, error) {
 	return s, nil
 }
 
-// seedCodexHome writes trust + feature flag config so Codex loads the
-// project's .codex/ layer. This mirrors what `entire enable` does via
-// ensureProjectTrusted, but into the isolated E2E CODEX_HOME.
+// seedCodexHome writes trust + feature flag config and links auth credentials
+// so Codex loads the project's .codex/ layer and can authenticate.
 func seedCodexHome(home, projectDir string) error {
-	config := fmt.Sprintf("[features]\ncodex_hooks = true\n\n[projects.%q]\ntrust_level = \"trusted\"\n", projectDir)
 	if err := os.MkdirAll(home, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600)
+
+	// Write config with trust + feature flag
+	config := fmt.Sprintf("[features]\ncodex_hooks = true\n\n[projects.%q]\ntrust_level = \"trusted\"\n", projectDir)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+		return err
+	}
+
+	// Symlink auth.json from the real ~/.codex/ so API credentials are available.
+	// Auth via OPENAI_API_KEY env var still works, but codex may also check auth.json
+	// for OAuth/token-based auth.
+	if realHome, err := os.UserHomeDir(); err == nil {
+		src := filepath.Join(realHome, ".codex", "auth.json")
+		if _, err := os.Stat(src); err == nil {
+			_ = os.Symlink(src, filepath.Join(home, "auth.json"))
+		}
+	}
+
+	return nil
 }
