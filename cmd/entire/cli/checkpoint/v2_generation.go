@@ -59,8 +59,7 @@ func (s *V2GitStore) readGeneration(treeHash plumbing.Hash) (GenerationMetadata,
 
 	file, err := tree.File(paths.GenerationFileName)
 	if err != nil {
-		// File doesn't exist — empty/new generation
-		return GenerationMetadata{}, nil
+		return GenerationMetadata{}, nil //nolint:nilerr // Missing file means empty/new generation
 	}
 
 	content, err := file.Contents()

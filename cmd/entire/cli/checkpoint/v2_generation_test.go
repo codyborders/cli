@@ -477,7 +477,7 @@ func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
 	require.NoError(t, err)
 	for _, cpID := range cpIDs {
 		_, treeErr := archiveTree.File(cpID.Path() + "/0/" + paths.TranscriptFileName)
-		assert.NoError(t, treeErr, "archived tree should contain transcript for %s", cpID)
+		require.NoError(t, treeErr, "archived tree should contain transcript for %s", cpID)
 	}
 
 	// --- Verify fresh /full/current ---
