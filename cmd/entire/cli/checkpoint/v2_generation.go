@@ -36,7 +36,7 @@ type GenerationMetadata struct {
 	// Checkpoints is the list of checkpoint IDs stored in this generation.
 	// Used for finding which generation holds a specific checkpoint
 	// without walking the tree. len(Checkpoints) gives the count.
-	Checkpoints []string `json:"checkpoints"`
+	Checkpoints []id.CheckpointID `json:"checkpoints"`
 
 	// OldestCheckpointAt is the creation time of the earliest checkpoint.
 	OldestCheckpointAt time.Time `json:"oldest_checkpoint_at"`
@@ -123,19 +123,17 @@ func (s *V2GitStore) updateGenerationForWrite(rootTreeHash plumbing.Hash, checkp
 		return GenerationMetadata{}, err
 	}
 
-	cpStr := checkpointID.String()
-
 	// Only append if checkpoint ID is not already present (multi-session writes
 	// to the same checkpoint should not duplicate the ID).
 	found := false
 	for _, existing := range gen.Checkpoints {
-		if existing == cpStr {
+		if existing == checkpointID {
 			found = true
 			break
 		}
 	}
 	if !found {
-		gen.Checkpoints = append(gen.Checkpoints, cpStr)
+		gen.Checkpoints = append(gen.Checkpoints, checkpointID)
 	}
 
 	gen.NewestCheckpointAt = now
@@ -238,7 +236,7 @@ func (s *V2GitStore) rotateGeneration(ctx context.Context) error {
 
 	// Phase 2: Create fresh orphan /full/current
 	seedGen := GenerationMetadata{
-		Checkpoints: []string{},
+		Checkpoints: []id.CheckpointID{},
 	}
 	seedEntries := make(map[string]object.TreeEntry)
 	if err := s.writeGeneration(seedGen, seedEntries); err != nil {

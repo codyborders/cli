@@ -41,7 +41,7 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
-		Checkpoints:        []string{"aabbccddeeff", "112233445566"},
+		Checkpoints:        []id.CheckpointID{id.MustCheckpointID("aabbccddeeff"), id.MustCheckpointID("112233445566")},
 		OldestCheckpointAt: now.Add(-1 * time.Hour),
 		NewestCheckpointAt: now,
 	}
@@ -57,7 +57,7 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 	gen, err := store.readGeneration(treeHash)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"aabbccddeeff", "112233445566"}, gen.Checkpoints)
+	assert.Equal(t, []id.CheckpointID{id.MustCheckpointID("aabbccddeeff"), id.MustCheckpointID("112233445566")}, gen.Checkpoints)
 	assert.True(t, gen.OldestCheckpointAt.Equal(now.Add(-1*time.Hour)))
 	assert.True(t, gen.NewestCheckpointAt.Equal(now))
 }
@@ -69,7 +69,7 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 
 	now := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
-		Checkpoints:        []string{"aabbccddeeff"},
+		Checkpoints:        []id.CheckpointID{id.MustCheckpointID("aabbccddeeff")},
 		OldestCheckpointAt: now,
 		NewestCheckpointAt: now,
 	}
@@ -99,7 +99,7 @@ func TestReadGenerationFromRef(t *testing.T) {
 	// Create a ref with generation.json in its tree
 	now := time.Date(2026, 3, 25, 14, 0, 0, 0, time.UTC)
 	gen := GenerationMetadata{
-		Checkpoints:        []string{"aabbccddeeff"},
+		Checkpoints:        []id.CheckpointID{id.MustCheckpointID("aabbccddeeff")},
 		OldestCheckpointAt: now,
 		NewestCheckpointAt: now,
 	}
@@ -119,7 +119,7 @@ func TestReadGenerationFromRef(t *testing.T) {
 	result, err := store.readGenerationFromRef(refName)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"aabbccddeeff"}, result.Checkpoints)
+	assert.Equal(t, []id.CheckpointID{id.MustCheckpointID("aabbccddeeff")}, result.Checkpoints)
 }
 
 func TestAddGenerationToRootTree(t *testing.T) {
@@ -138,7 +138,7 @@ func TestAddGenerationToRootTree(t *testing.T) {
 	require.NoError(t, err)
 
 	gen := GenerationMetadata{
-		Checkpoints: []string{"aabbccddeeff"},
+		Checkpoints: []id.CheckpointID{id.MustCheckpointID("aabbccddeeff")},
 	}
 
 	// Add generation.json to the root tree
@@ -192,7 +192,7 @@ func TestWriteCommittedFull_UpdatesGenerationJSON(t *testing.T) {
 
 	gen := v2FullGeneration(t, repo)
 	assert.Len(t, gen.Checkpoints, 1)
-	assert.Equal(t, []string{cpID.String()}, gen.Checkpoints)
+	assert.Equal(t, []id.CheckpointID{cpID}, gen.Checkpoints)
 	assert.False(t, gen.OldestCheckpointAt.IsZero())
 	assert.False(t, gen.NewestCheckpointAt.IsZero())
 }
@@ -230,7 +230,7 @@ func TestWriteCommittedFull_AccumulatesInGenerationJSON(t *testing.T) {
 
 	gen := v2FullGeneration(t, repo)
 	assert.Len(t, gen.Checkpoints, 2)
-	assert.Equal(t, []string{cpA.String(), cpB.String()}, gen.Checkpoints)
+	assert.Equal(t, []id.CheckpointID{cpA, cpB}, gen.Checkpoints)
 	assert.True(t, gen.NewestCheckpointAt.After(gen.OldestCheckpointAt) || gen.NewestCheckpointAt.Equal(gen.OldestCheckpointAt))
 }
 
@@ -303,7 +303,7 @@ func TestWriteCommittedFull_GenerationJSON_SameCheckpointIdNotDuplicated(t *test
 	gen := v2FullGeneration(t, repo)
 	// Same checkpoint ID written twice should only appear once in the array
 	assert.Len(t, gen.Checkpoints, 1)
-	assert.Equal(t, []string{cpID.String()}, gen.Checkpoints)
+	assert.Equal(t, []id.CheckpointID{cpID}, gen.Checkpoints)
 }
 
 func TestWriteCommittedFull_GenerationJSON_PreservedInTree(t *testing.T) {
@@ -343,7 +343,7 @@ func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
 
 	// Build a minimal tree with just generation.json
 	gen := GenerationMetadata{
-		Checkpoints: []string{"dummy000000"},
+		Checkpoints: []id.CheckpointID{id.MustCheckpointID("d00000000000")},
 	}
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, store.writeGeneration(gen, entries))
@@ -469,7 +469,7 @@ func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, archiveGen.Checkpoints, 3)
 	for i, cpID := range cpIDs {
-		assert.Equal(t, cpID.String(), archiveGen.Checkpoints[i])
+		assert.Equal(t, cpID, archiveGen.Checkpoints[i])
 	}
 
 	// Archived tree should contain the checkpoint data

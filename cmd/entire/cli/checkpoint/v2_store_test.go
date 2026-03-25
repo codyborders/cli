@@ -770,7 +770,7 @@ func TestWriteCommitted_TriggersRotationAtThreshold(t *testing.T) {
 	gen, err = store.readGenerationFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName))
 	require.NoError(t, err)
 	assert.Len(t, gen.Checkpoints, 1, "new checkpoint should be on fresh generation")
-	assert.Equal(t, cpID4.String(), gen.Checkpoints[0])
+	assert.Equal(t, cpID4, gen.Checkpoints[0])
 }
 
 func TestWriteCommitted_NoRotationBelowThreshold(t *testing.T) {
