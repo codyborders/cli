@@ -248,6 +248,18 @@ func (s *V2GitStore) rotateGeneration(ctx context.Context) error {
 		return fmt.Errorf("rotation: failed to create archived ref %s: %w", archiveRefName, err)
 	}
 
+	// Verify /full/current hasn't been advanced by another writer since we read it.
+	// If it changed, abort — the archive ref is harmless (points to a valid commit)
+	// and the next writer will trigger rotation again.
+	postArchiveRef, err := s.repo.Reference(refName, true)
+	if err != nil {
+		return fmt.Errorf("rotation: failed to re-read /full/current: %w", err)
+	}
+	if postArchiveRef.Hash() != currentRef.Hash() {
+		logging.Info(ctx, "rotation: /full/current changed during rotation, aborting reset")
+		return nil
+	}
+
 	// Phase 2: Create fresh orphan /full/current
 	seedGen := GenerationMetadata{
 		Checkpoints: []id.CheckpointID{},
