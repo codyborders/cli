@@ -218,15 +218,9 @@ func (c *CodexAgent) AreHooksInstalled(ctx context.Context) bool {
 		return false
 	}
 
-	// Check for both production and localDev hook formats
-	for _, group := range hooksFile.Hooks.Stop {
-		for _, hook := range group.Hooks {
-			if isEntireHook(hook.Command) {
-				return true
-			}
-		}
-	}
-	return false
+	return hasEntireHook(hooksFile.Hooks.SessionStart) &&
+		hasEntireHook(hooksFile.Hooks.UserPromptSubmit) &&
+		hasEntireHook(hooksFile.Hooks.Stop)
 }
 
 // --- Helpers ---
@@ -285,6 +279,17 @@ func isEntireHook(command string) bool {
 	for _, prefix := range entireHookPrefixes {
 		if strings.HasPrefix(command, prefix) {
 			return true
+		}
+	}
+	return false
+}
+
+func hasEntireHook(groups []MatcherGroup) bool {
+	for _, group := range groups {
+		for _, hook := range group.Hooks {
+			if isEntireHook(hook.Command) {
+				return true
+			}
 		}
 	}
 	return false

@@ -115,6 +115,28 @@ func TestAreHooksInstalled_WithHooks(t *testing.T) {
 	require.True(t, ag.AreHooksInstalled(context.Background()))
 }
 
+func TestAreHooksInstalled_PartialHooks(t *testing.T) {
+	tempDir := setupTestEnv(t)
+
+	codexDir := filepath.Join(tempDir, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(codexDir, HooksFileName), []byte(`{
+		"hooks": {
+			"Stop": [
+				{
+					"matcher": null,
+					"hooks": [
+						{"type": "command", "command": "entire hooks codex stop", "timeout": 30}
+					]
+				}
+			]
+		}
+	}`), 0o600))
+
+	ag := &CodexAgent{}
+	require.False(t, ag.AreHooksInstalled(context.Background()))
+}
+
 func TestInstallHooks_PreservesExistingHooksJSON(t *testing.T) {
 	tempDir := setupTestEnv(t)
 
