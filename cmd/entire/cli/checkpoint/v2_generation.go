@@ -138,11 +138,13 @@ func (s *V2GitStore) updateGenerationForWrite(rootTreeHash plumbing.Hash, checkp
 	}
 	if !found {
 		gen.Checkpoints = append(gen.Checkpoints, checkpointID)
-	}
 
-	gen.NewestCheckpointAt = now
-	if gen.OldestCheckpointAt.IsZero() {
-		gen.OldestCheckpointAt = now
+		// Only update timestamps when a new checkpoint is added, so they reflect
+		// checkpoint creation times rather than last-write times.
+		if gen.OldestCheckpointAt.IsZero() {
+			gen.OldestCheckpointAt = now
+		}
+		gen.NewestCheckpointAt = now
 	}
 
 	return gen, nil
