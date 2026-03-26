@@ -1677,6 +1677,16 @@ func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commi
 			return true
 		}
 	}
+	// Log why fast path didn't fire — collect session phases for diagnostics.
+	phases := make([]string, 0, len(sessions))
+	for _, state := range sessions {
+		phases = append(phases, string(state.Phase))
+	}
+	logging.Debug(logCtx, "prepare-commit-msg: fast path found no ACTIVE sessions",
+		slog.Bool("no_tty", !hasTTY()),
+		slog.Int("sessions", len(sessions)),
+		slog.Any("session_phases", phases),
+	)
 	return false
 }
 
