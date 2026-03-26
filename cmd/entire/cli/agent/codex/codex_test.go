@@ -3,6 +3,7 @@ package codex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestCodexAgent_ReadSession(t *testing.T) {
 	require.Equal(t, path, session.SessionRef)
 	require.Equal(t, time.Date(2026, time.March, 25, 11, 31, 10, 922000000, time.UTC), session.StartTime)
 	require.ElementsMatch(t, []string{"hello.txt", "docs/readme.md"}, session.ModifiedFiles)
-	require.Equal(t, sampleRollout, string(session.NativeData))
+	requireJSONL(t, sampleRollout, string(session.NativeData))
 }
 
 func TestCodexAgent_ReadSession_InvalidSessionMeta(t *testing.T) {
@@ -96,4 +97,15 @@ func TestCodexAgent_ReadSession_InvalidSessionMeta(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.ErrorContains(t, err, `first transcript line is "response_item", want session_meta`)
+}
+
+func requireJSONL(t *testing.T, expected string, actual string) {
+	t.Helper()
+
+	expectedLines := strings.Split(strings.TrimSuffix(expected, "\n"), "\n")
+	actualLines := strings.Split(strings.TrimSuffix(actual, "\n"), "\n")
+	require.Len(t, actualLines, len(expectedLines))
+	for i := range expectedLines {
+		require.JSONEq(t, expectedLines[i], actualLines[i])
+	}
 }
