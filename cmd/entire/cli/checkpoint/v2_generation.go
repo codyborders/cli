@@ -241,8 +241,15 @@ func (s *V2GitStore) rotateGeneration(ctx context.Context) error {
 		return fmt.Errorf("rotation: failed to determine next generation number: %w", err)
 	}
 
-	// Phase 1: Archive — create ref pointing to the current commit
+	// Phase 1: Archive — create ref pointing to the current commit.
+	// If the archive ref already exists, another instance already rotated — skip.
 	archiveRefName := plumbing.ReferenceName(fmt.Sprintf("%s%0*d", paths.V2FullRefPrefix, generationRefWidth, archiveNumber))
+	if _, refErr := s.repo.Reference(archiveRefName, true); refErr == nil {
+		logging.Info(ctx, "rotation: archive ref already exists, skipping",
+			slog.String("archive_ref", string(archiveRefName)),
+		)
+		return nil
+	}
 	archiveRef := plumbing.NewHashReference(archiveRefName, currentRef.Hash())
 	if err := s.repo.Storer.SetReference(archiveRef); err != nil {
 		return fmt.Errorf("rotation: failed to create archived ref %s: %w", archiveRefName, err)
