@@ -21,7 +21,6 @@ func setupTestEnv(t *testing.T) string {
 
 func TestInstallHooks_CreatesConfig(t *testing.T) {
 	tempDir := setupTestEnv(t)
-	codexHome := os.Getenv("CODEX_HOME")
 
 	ag := &CodexAgent{}
 	count, err := ag.InstallHooks(context.Background(), false, false)
@@ -42,13 +41,6 @@ func TestInstallHooks_CreatesConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(projectData), "codex_hooks = true")
 	require.Contains(t, string(projectData), "[features]")
-
-	// Verify user-level config.toml trusts this project
-	userConfig := filepath.Join(codexHome, configFileName)
-	userData, err := os.ReadFile(userConfig)
-	require.NoError(t, err)
-	require.Contains(t, string(userData), `trust_level = "trusted"`)
-	require.Contains(t, string(userData), tempDir)
 }
 
 func TestInstallHooks_Idempotent(t *testing.T) {
@@ -153,7 +145,7 @@ func TestInstallHooks_PreservesExistingHooksJSON(t *testing.T) {
 	require.Contains(t, string(data), "entire hooks codex stop")
 }
 
-func TestInstallHooks_PreservesExistingUserConfig(t *testing.T) {
+func TestInstallHooks_DoesNotModifyUserConfig(t *testing.T) {
 	setupTestEnv(t)
 	codexHome := os.Getenv("CODEX_HOME")
 
@@ -168,5 +160,5 @@ func TestInstallHooks_PreservesExistingUserConfig(t *testing.T) {
 	configData, err := os.ReadFile(filepath.Join(codexHome, configFileName))
 	require.NoError(t, err)
 	require.Contains(t, string(configData), "model = \"gpt-4.1\"")
-	require.Contains(t, string(configData), `trust_level = "trusted"`)
+	require.NotContains(t, string(configData), `trust_level = "trusted"`)
 }

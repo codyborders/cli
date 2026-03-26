@@ -91,13 +91,10 @@ func (c *CodexAgent) InstallHooks(ctx context.Context, localDev bool, force bool
 	}
 
 	if count == 0 {
-		// Still ensure feature flag and trust are configured even if hooks
+		// Still ensure the feature flag is configured even if hooks
 		// were already present (e.g., manually installed).
 		if err := ensureProjectFeatureEnabled(repoRoot); err != nil {
 			return 0, fmt.Errorf("failed to enable codex_hooks feature: %w", err)
-		}
-		if err := ensureProjectTrusted(repoRoot); err != nil {
-			return 0, fmt.Errorf("failed to trust project: %w", err)
 		}
 		return 0, nil
 	}
@@ -137,13 +134,6 @@ func (c *CodexAgent) InstallHooks(ctx context.Context, localDev bool, force bool
 	// This keeps the feature flag per-repo rather than global.
 	if err := ensureProjectFeatureEnabled(repoRoot); err != nil {
 		return count, fmt.Errorf("failed to enable codex_hooks feature: %w", err)
-	}
-
-	// Trust this project in the user-level ~/.codex/config.toml so Codex
-	// actually loads the project-level .codex/ config layer (hooks.json + config.toml).
-	// Without trust, Codex silently disables the entire project layer.
-	if err := ensureProjectTrusted(repoRoot); err != nil {
-		return count, fmt.Errorf("failed to trust project: %w", err)
 	}
 
 	return count, nil
@@ -351,47 +341,6 @@ func ensureProjectFeatureEnabled(repoRoot string) error {
 		return fmt.Errorf("failed to create .codex directory: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil { //nolint:gosec // path constructed from repo root
-		return fmt.Errorf("failed to write config.toml: %w", err)
-	}
-	return nil
-}
-
-// ensureProjectTrusted adds a trust entry for the repo in the user-level
-// ~/.codex/config.toml so Codex loads the project's .codex/ config layer.
-func ensureProjectTrusted(repoRoot string) error {
-	codexHome, err := resolveCodexHome()
-	if err != nil {
-		return err
-	}
-
-	absRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-
-	configPath := filepath.Join(codexHome, configFileName)
-
-	data, err := os.ReadFile(configPath) //nolint:gosec // path in user home directory
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read config.toml: %w", err)
-	}
-
-	content := string(data)
-
-	trustSection := fmt.Sprintf("[projects.%q]", absRoot)
-	if strings.Contains(content, trustSection) {
-		return nil // already has an entry for this project
-	}
-
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += "\n" + trustSection + "\n" + `trust_level = "trusted"` + "\n"
-
-	if err := os.MkdirAll(codexHome, 0o750); err != nil {
-		return fmt.Errorf("failed to create codex home directory: %w", err)
-	}
-	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil { //nolint:gosec // path in user home directory
 		return fmt.Errorf("failed to write config.toml: %w", err)
 	}
 	return nil
