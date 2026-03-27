@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
@@ -105,7 +106,7 @@ func (s *V2GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Che
 		}
 	}
 
-	transcript, transcriptErr := s.resolveTranscriptFromFull(ctx, checkpointID, sessionIndex)
+	transcript, transcriptErr := s.resolveTranscriptFromFull(ctx, checkpointID, sessionIndex, result.Metadata.Agent)
 	if transcriptErr != nil {
 		logging.Debug(ctx, "v2 transcript resolution failed",
 			slog.String("checkpoint_id", string(checkpointID)),
@@ -120,14 +121,14 @@ func (s *V2GitStore) ReadSessionContent(ctx context.Context, checkpointID id.Che
 
 // resolveTranscriptFromFull searches /full/current then archived generations
 // for the raw transcript of a specific checkpoint session.
-func (s *V2GitStore) resolveTranscriptFromFull(ctx context.Context, checkpointID id.CheckpointID, sessionIndex int) ([]byte, error) {
+func (s *V2GitStore) resolveTranscriptFromFull(ctx context.Context, checkpointID id.CheckpointID, sessionIndex int, agentType types.AgentType) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err //nolint:wrapcheck // Propagating context cancellation
 	}
 
 	sessionPath := fmt.Sprintf("%s/%d", checkpointID.Path(), sessionIndex)
 
-	transcript, err := s.readTranscriptFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName), sessionPath)
+	transcript, err := s.readTranscriptFromRef(plumbing.ReferenceName(paths.V2FullCurrentRefName), sessionPath, agentType)
 	if err == nil && len(transcript) > 0 {
 		return transcript, nil
 	}
@@ -138,7 +139,7 @@ func (s *V2GitStore) resolveTranscriptFromFull(ctx context.Context, checkpointID
 	}
 	for i := len(archived) - 1; i >= 0; i-- {
 		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + archived[i])
-		transcript, err := s.readTranscriptFromRef(refName, sessionPath)
+		transcript, err := s.readTranscriptFromRef(refName, sessionPath, agentType)
 		if err == nil && len(transcript) > 0 {
 			return transcript, nil
 		}
@@ -150,9 +151,9 @@ func (s *V2GitStore) resolveTranscriptFromFull(ctx context.Context, checkpointID
 // readTranscriptFromRef reads the raw transcript from a specific /full/* ref.
 // Follows the same chunking convention as readTranscriptFromTree in committed.go:
 // chunk 0 is the base file (full.jsonl), chunks 1+ are full.jsonl.001, .002, etc.
-// When chunk files exist, all chunks (including chunk 0) are reassembled with
-// JSONL-aware newline handling via agent.ReassembleJSONL.
-func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessionPath string) ([]byte, error) {
+// When chunk files exist, all chunks (including chunk 0) are reassembled using
+// agent-aware reassembly via agent.ReassembleTranscript.
+func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessionPath string, agentType types.AgentType) ([]byte, error) {
 	_, rootTreeHash, err := s.getRefState(refName)
 	if err != nil {
 		return nil, err
@@ -168,12 +169,13 @@ func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessi
 		return nil, fmt.Errorf("session path %s not found: %w", sessionPath, err)
 	}
 
-	return readTranscriptFromObjectTree(sessionTree)
+	return readTranscriptFromObjectTree(sessionTree, agentType)
 }
 
 // readTranscriptFromObjectTree reads and reassembles a transcript from a git tree object.
-// Handles both chunked and non-chunked transcripts.
-func readTranscriptFromObjectTree(tree *object.Tree) ([]byte, error) {
+// Handles both chunked and non-chunked transcripts. Uses agent-aware reassembly
+// when agentType is known, falling back to JSONL reassembly otherwise.
+func readTranscriptFromObjectTree(tree *object.Tree, agentType types.AgentType) ([]byte, error) {
 	var chunkFiles []string
 	var hasBaseFile bool
 
@@ -210,7 +212,11 @@ func readTranscriptFromObjectTree(tree *object.Tree) ([]byte, error) {
 		}
 
 		if len(chunks) > 0 {
-			return agent.ReassembleJSONL(chunks), nil
+			result, reassembleErr := agent.ReassembleTranscript(chunks, agentType)
+			if reassembleErr != nil {
+				return nil, fmt.Errorf("failed to reassemble transcript: %w", reassembleErr)
+			}
+			return result, nil
 		}
 	}
 
