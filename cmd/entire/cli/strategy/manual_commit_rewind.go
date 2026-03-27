@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	cpkg "github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/osroot"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/settings"
@@ -634,7 +636,14 @@ func (s *ManualCommitStrategy) RestoreLogsOnly(ctx context.Context, w, errW io.W
 	if v2Enabled {
 		v2Store, v2Err := s.getV2CheckpointStore()
 		if v2Err == nil {
-			summary, _ = v2Store.ReadCommitted(ctx, point.CheckpointID) //nolint:errcheck // v2 miss is expected, fall through to v1
+			var v2ReadErr error
+			summary, v2ReadErr = v2Store.ReadCommitted(ctx, point.CheckpointID)
+			if v2ReadErr != nil {
+				logging.Debug(ctx, "v2 ReadCommitted failed, falling back to v1",
+					slog.String("checkpoint_id", string(point.CheckpointID)),
+					slog.String("error", v2ReadErr.Error()),
+				)
+			}
 		}
 	}
 	if summary == nil {
