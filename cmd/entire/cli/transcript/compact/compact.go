@@ -283,22 +283,11 @@ func parseLine(lineBytes []byte, preprocess linePreprocessor) (parsedEntry, bool
 				e.toolResults = toolResults
 			}
 		}
-		// Also check toolUseResult.stdout which may have the output.
+		// Enrich tool results with metadata from toolUseResult.
 		if turRaw, ok := raw["toolUseResult"]; ok {
 			var tur map[string]json.RawMessage
 			if json.Unmarshal(turRaw, &tur) == nil {
-				if stdout := unquote(tur["stdout"]); stdout != "" {
-					switch len(e.toolResults) {
-					case 0:
-						// Keep compatibility with transcripts that only include toolUseResult.
-						e.toolResults = []toolResultEntry{{
-							output: stdout,
-						}}
-					case 1:
-						// toolUseResult is a single envelope for one tool call.
-						e.toolResults[0].output = stdout
-					}
-				}
+				enrichToolResults(e.toolResults, tur)
 			}
 		}
 	}
@@ -347,15 +336,7 @@ func inlineToolResults(assistant, user parsedEntry) parsedEntry {
 			continue
 		}
 
-		status := "success"
-		if tr.isError {
-			status = "error"
-		}
-		resultObj := marshalOrdered(
-			"output", mustMarshal(tr.output),
-			"status", mustMarshal(status),
-		)
-		blocks[idx]["result"] = resultObj
+		blocks[idx]["result"] = buildToolResult(tr)
 	}
 
 	if data, err := json.Marshal(blocks); err == nil {
@@ -363,6 +344,43 @@ func inlineToolResults(assistant, user parsedEntry) parsedEntry {
 	}
 
 	return assistant
+}
+
+// buildToolResult constructs the compact result object for a tool_use block,
+// including optional rich metadata (file, matchCount) when available.
+func buildToolResult(tr toolResultEntry) json.RawMessage {
+	status := "success"
+	if tr.isError {
+		status = "error"
+	}
+
+	// Build file metadata JSON if present.
+	var fileJSON json.RawMessage
+	if tr.file != nil {
+		if tr.file.numLines > 0 {
+			fileJSON = marshalOrdered(
+				"filePath", mustMarshal(tr.file.filePath),
+				"numLines", mustMarshal(tr.file.numLines),
+			)
+		} else {
+			fileJSON = marshalOrdered(
+				"filePath", mustMarshal(tr.file.filePath),
+			)
+		}
+	}
+
+	// matchCount: only include if > 0.
+	var matchCountJSON json.RawMessage
+	if tr.matchCount > 0 {
+		matchCountJSON = mustMarshal(tr.matchCount)
+	}
+
+	return marshalOrdered(
+		"output", mustMarshal(tr.output),
+		"status", mustMarshal(status),
+		"file", fileJSON,
+		"matchCount", matchCountJSON,
+	)
 }
 
 // jsonStringOrNil returns a JSON-encoded string, or nil if s is empty.
@@ -387,6 +405,76 @@ type toolResultEntry struct {
 	toolUseID string
 	output    string
 	isError   bool
+	// Rich metadata extracted from toolUseResult (optional).
+	file       *toolResultFile // Read/Edit: file path and line count
+	matchCount int             // Grep: number of matching files
+}
+
+// toolResultFile carries structured file metadata from Read/Edit tool results.
+type toolResultFile struct {
+	filePath string
+	numLines int // 0 if not available (e.g. Edit results)
+}
+
+// enrichToolResults extracts structured metadata from a toolUseResult envelope
+// and attaches it to the corresponding tool result entries.
+//
+// Claude Code's toolUseResult has different shapes per tool:
+//   - Bash:  {stdout, stderr, interrupted, ...}
+//   - Read:  {type:"text", file:{filePath, numLines, content, ...}}
+//   - Grep:  {numFiles, numLines, filenames, content, mode}
+//   - Edit:  {filePath, oldString, newString, structuredPatch, ...}
+func enrichToolResults(results []toolResultEntry, tur map[string]json.RawMessage) {
+	// Bash-style: stdout provides the output text.
+	if stdout := unquote(tur["stdout"]); stdout != "" {
+		switch len(results) {
+		case 0:
+			// Keep compatibility with transcripts that only include toolUseResult.
+			results = append(results, toolResultEntry{output: stdout})
+		case 1:
+			results[0].output = stdout
+		}
+	}
+
+	// Read-style: file object with filePath and numLines.
+	if fileRaw, ok := tur["file"]; ok {
+		var file struct {
+			FilePath string `json:"filePath"`
+			NumLines int    `json:"numLines"`
+		}
+		if json.Unmarshal(fileRaw, &file) == nil && file.FilePath != "" {
+			applyToSingleResult(results, func(tr *toolResultEntry) {
+				tr.file = &toolResultFile{filePath: file.FilePath, numLines: file.NumLines}
+			})
+		}
+	}
+
+	// Edit-style: top-level filePath.
+	if filePath := unquote(tur["filePath"]); filePath != "" {
+		applyToSingleResult(results, func(tr *toolResultEntry) {
+			// Edit results don't have numLines.
+			tr.file = &toolResultFile{filePath: filePath}
+		})
+	}
+
+	// Grep-style: numFiles as match count.
+	if numFilesRaw, ok := tur["numFiles"]; ok {
+		var n int
+		if json.Unmarshal(numFilesRaw, &n) == nil && n > 0 {
+			applyToSingleResult(results, func(tr *toolResultEntry) {
+				tr.matchCount = n
+			})
+		}
+	}
+}
+
+// applyToSingleResult applies fn to the first (and expected only) tool result.
+// toolUseResult is a single-tool envelope, so this is only meaningful when
+// there's exactly one result entry.
+func applyToSingleResult(results []toolResultEntry, fn func(*toolResultEntry)) {
+	if len(results) == 1 {
+		fn(&results[0])
+	}
 }
 
 // parseMessage extracts and parses the "message" field from a JSONL transcript

@@ -80,13 +80,13 @@ func TestCompact_UserWithToolResult(t *testing.T) {
 
 	// Assistant with tool_use followed by user with tool_result: the result
 	// is inlined into the assistant's tool_use block and the user tool_result
-	// line is dropped.
+	// line is dropped. Rich metadata from toolUseResult (file) is preserved.
 	input := []byte(`{"type":"assistant","timestamp":"2026-01-01T00:00:59Z","requestId":"req-1","message":{"id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"}}]}}
 {"type":"user","uuid":"u2","timestamp":"2026-01-01T00:01:00Z","parentUuid":"u1","cwd":"/repo","sessionId":"sess-1","message":{"content":[{"type":"tool_result","tool_use_id":"tu-1","content":"file1.txt\nfile2.txt"},{"type":"text","text":"now fix the bug"}]},"toolUseResult":{"type":"text","file":{"filePath":"/repo/file1.txt","numLines":10},"output":"file1.txt\nfile2.txt","matchCount":2}}
 `)
 
 	expected := []string{
-		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"2026-01-01T00:00:59Z","id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"},"result":{"output":"file1.txt\nfile2.txt","status":"success"}}]}`,
+		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"2026-01-01T00:00:59Z","id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"},"result":{"output":"file1.txt\nfile2.txt","status":"success","file":{"filePath":"/repo/file1.txt","numLines":10}}}]}`,
 		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"user","ts":"2026-01-01T00:01:00Z","content":[{"text":"now fix the bug"}]}`,
 	}
 
@@ -179,6 +179,68 @@ func TestCompact_ClaudeFixture(t *testing.T) {
 	assertFixtureTransform(t, defaultOpts, "testdata/claude_full.jsonl", "testdata/claude_expected.jsonl")
 }
 
+func TestCompact_ClaudeFixture2(t *testing.T) {
+	t.Parallel()
+
+	assertFixtureTransform(t, defaultOpts, "testdata/claude_full2.jsonl", "testdata/claude_expected2.jsonl")
+}
+
+// --- Rich tool result metadata tests ---
+
+func TestCompact_ReadToolResult_PreservesFileMetadata(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`{"type":"assistant","timestamp":"t0","requestId":"req-1","message":{"id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Read","input":{"file_path":"/repo/main.go"}}]}}
+{"type":"user","uuid":"u1","timestamp":"t1","message":{"content":[{"type":"tool_result","tool_use_id":"tu-1","content":"package main\nfunc main() {}"}]},"toolUseResult":{"type":"text","file":{"filePath":"/repo/main.go","numLines":2,"startLine":1,"totalLines":2,"content":"package main\nfunc main() {}"}}}
+`)
+
+	expected := []string{
+		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"t0","id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Read","input":{"file_path":"/repo/main.go"},"result":{"output":"package main\nfunc main() {}","status":"success","file":{"filePath":"/repo/main.go","numLines":2}}}]}`,
+	}
+
+	result, err := Compact(input, defaultOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertJSONLines(t, result, expected)
+}
+
+func TestCompact_GrepToolResult_PreservesMatchCount(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`{"type":"assistant","timestamp":"t0","requestId":"req-1","message":{"id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Grep","input":{"pattern":"TODO"}}]}}
+{"type":"user","uuid":"u1","timestamp":"t1","message":{"content":[{"type":"tool_result","tool_use_id":"tu-1","content":"Found 5 files\na.go\nb.go"}]},"toolUseResult":{"content":"Found 5 files\na.go\nb.go","numFiles":5,"numLines":10,"filenames":["a.go","b.go"],"mode":"files_with_matches"}}
+`)
+
+	expected := []string{
+		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"t0","id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Grep","input":{"pattern":"TODO"},"result":{"output":"Found 5 files\na.go\nb.go","status":"success","matchCount":5}}]}`,
+	}
+
+	result, err := Compact(input, defaultOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertJSONLines(t, result, expected)
+}
+
+func TestCompact_EditToolResult_PreservesFilePath(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`{"type":"assistant","timestamp":"t0","requestId":"req-1","message":{"id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Edit","input":{"file_path":"/repo/main.go","old_string":"bad","new_string":"good"}}]}}
+{"type":"user","uuid":"u1","timestamp":"t1","message":{"content":[{"type":"tool_result","tool_use_id":"tu-1","content":""}]},"toolUseResult":{"filePath":"/repo/main.go","oldString":"bad","newString":"good","structuredPatch":"@@ -1 +1 @@\n-bad\n+good"}}
+`)
+
+	expected := []string{
+		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"t0","id":"msg-1","content":[{"type":"tool_use","id":"tu-1","name":"Edit","input":{"file_path":"/repo/main.go","old_string":"bad","new_string":"good"},"result":{"output":"","status":"success","file":{"filePath":"/repo/main.go"}}}]}`,
+	}
+
+	result, err := Compact(input, defaultOpts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertJSONLines(t, result, expected)
+}
+
 // --- Truncation + filtering tests ---
 
 // Realistic full.jsonl: lines 0-2 are duplicated prefix, lines 3-6 are new content.
@@ -217,8 +279,8 @@ func TestCompact_FullFixture_NoTruncation(t *testing.T) {
 	expected := []string{
 		// Line 0: user "hello"
 		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"user","ts":"2026-01-01T00:00:00Z","content":[{"text":"hello"}]}`,
-		// Line 1: assistant (thinking stripped, caller stripped, tool result inlined from line 3)
-		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"2026-01-01T00:00:01Z","id":"msg-1","content":[{"type":"text","text":"Hi there!"},{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"},"result":{"output":"file1.txt\nfile2.txt","status":"success"}}]}`,
+		// Line 1: assistant (thinking stripped, caller stripped, tool result inlined from line 3 with file metadata)
+		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"assistant","ts":"2026-01-01T00:00:01Z","id":"msg-1","content":[{"type":"text","text":"Hi there!"},{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"},"result":{"output":"file1.txt\nfile2.txt","status":"success","file":{"filePath":"/repo/file1.txt","numLines":10}}}]}`,
 		// Line 2: progress — dropped
 		// Line 3: user with tool_result — inlined above, user text emitted
 		`{"v":1,"agent":"claude-code","cli_version":"0.5.1","type":"user","ts":"2026-01-01T00:01:00Z","content":[{"text":"now fix the bug"}]}`,
