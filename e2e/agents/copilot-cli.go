@@ -129,6 +129,10 @@ type CopilotSession struct {
 }
 
 func (cs *CopilotSession) Send(input string) error {
+	if err := cs.clearInputLine(); err != nil {
+		return err
+	}
+
 	preSend := stableContent(cs.Capture())
 
 	if err := cs.sendOnce(input, preSend); err != nil {
@@ -140,15 +144,20 @@ func (cs *CopilotSession) Send(input string) error {
 	// If detected, dismiss with Escape, clear the input, and retry once.
 	time.Sleep(300 * time.Millisecond)
 	if isAutocompleteMenu(cs.Capture()) {
-		if err := cs.SendKeys("Escape"); err != nil {
+		if err := cs.dismissAutocompleteAndClear(); err != nil {
 			return err
 		}
-		time.Sleep(200 * time.Millisecond)
-		// Ctrl+U clears the current input line.
-		if err := cs.SendKeys("C-u"); err != nil {
+		if err := cs.sendOnce(input, stableContent(cs.Capture())); err != nil {
 			return err
 		}
-		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Copilot can leave behind a stray slash-command invocation between turns.
+	// If that error appears after submission, clear the input line and retry once.
+	if content := cs.Capture(); strings.Contains(content, "Unknown command: /") {
+		if err := cs.clearInputLine(); err != nil {
+			return err
+		}
 		if err := cs.sendOnce(input, stableContent(cs.Capture())); err != nil {
 			return err
 		}
@@ -166,6 +175,27 @@ func (cs *CopilotSession) Send(input string) error {
 	}
 	cs.stableAtSend = stableContent(cs.Capture())
 	return nil
+}
+
+// clearInputLine removes any partially typed prompt text without sending other
+// UI navigation keys. In Copilot CLI, Escape can trigger undo/snapshot actions,
+// so routine pre-send cleanup must avoid it.
+func (cs *CopilotSession) clearInputLine() error {
+	if err := cs.SendKeys("C-u"); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
+	return nil
+}
+
+// dismissAutocompleteAndClear closes the slash-command autocomplete dropdown
+// and then clears the input line before retrying the prompt.
+func (cs *CopilotSession) dismissAutocompleteAndClear() error {
+	if err := cs.SendKeys("Escape"); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
+	return cs.clearInputLine()
 }
 
 // sendOnce types the input text, sends Enter, and handles Edit mode fallback.
