@@ -153,8 +153,9 @@ func (cs *CopilotSession) Send(input string) error {
 	}
 
 	// Copilot can leave behind a stray slash-command invocation between turns.
-	// If that error appears after submission, clear the input line and retry once.
-	if content := cs.Capture(); strings.Contains(content, "Unknown command: /") {
+	// Only retry if that error appeared in output produced by this submission,
+	// not merely somewhere in pane scrollback from an earlier turn.
+	if content := cs.Capture(); appearedInNewOutput(preSend, content, "Unknown command: /") {
 		if err := cs.clearInputLine(); err != nil {
 			return err
 		}
@@ -196,6 +197,24 @@ func (cs *CopilotSession) dismissAutocompleteAndClear() error {
 	}
 	time.Sleep(200 * time.Millisecond)
 	return cs.clearInputLine()
+}
+
+// appearedInNewOutput reports whether pattern is present in content that was
+// added after the pre-send snapshot. This avoids retriggering on old pane
+// scrollback from previous turns.
+func appearedInNewOutput(before string, after string, pattern string) bool {
+	if after == before {
+		return false
+	}
+	if strings.HasPrefix(after, before) {
+		return strings.Contains(after[len(before):], pattern)
+	}
+
+	// If tmux capture lost a clean prefix relationship due to scrollback churn,
+	// fall back to checking only the most recent lines.
+	lines := strings.Split(after, "\n")
+	start := max(0, len(lines)-12)
+	return strings.Contains(strings.Join(lines[start:], "\n"), pattern)
 }
 
 // sendOnce types the input text, sends Enter, and handles Edit mode fallback.
