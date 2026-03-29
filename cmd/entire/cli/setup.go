@@ -84,11 +84,29 @@ func updateStrategyOptions(ctx context.Context, w io.Writer, opts EnableOptions)
 
 	opts.applyStrategyOptions(s)
 
-	if err := SaveEntireSettings(ctx, s); err != nil {
-		return fmt.Errorf("failed to save settings: %w", err)
+	entireDirAbs, err := paths.AbsPath(ctx, paths.EntireDir)
+	if err != nil {
+		entireDirAbs = paths.EntireDir
+	}
+	shouldUseLocal, showNotification := determineSettingsTarget(entireDirAbs, opts.UseLocalSettings, opts.UseProjectSettings)
+	if showNotification {
+		fmt.Fprintln(w, "Info: Project settings exist. Saving to settings.local.json instead.")
+		fmt.Fprintln(w, "  Use --project to update the project settings file.")
 	}
 
-	fmt.Fprintf(w, "✓ Settings updated (%s)\n", configDisplayProject)
+	configDisplay := configDisplayProject
+	if shouldUseLocal {
+		if err := SaveEntireSettingsLocal(ctx, s); err != nil {
+			return fmt.Errorf("failed to save settings: %w", err)
+		}
+		configDisplay = configDisplayLocal
+	} else {
+		if err := SaveEntireSettings(ctx, s); err != nil {
+			return fmt.Errorf("failed to save settings: %w", err)
+		}
+	}
+
+	fmt.Fprintf(w, "✓ Settings updated (%s)\n", configDisplay)
 	return nil
 }
 
