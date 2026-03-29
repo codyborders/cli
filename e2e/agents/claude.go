@@ -11,34 +11,6 @@ import (
 	"time"
 )
 
-// cleanConfigDir creates an isolated temp directory for CLAUDE_CONFIG_DIR so
-// that E2E test runs don't inherit any user settings (CLAUDE.md, skills,
-// projects, plugins, etc.).
-//
-// On CI, it symlinks .claude.json (which Bootstrap() wrote with the API key
-// and hasCompletedOnboarding). Locally, it writes a minimal .claude.json to
-// skip the onboarding flow — Keychain-based auth works without any other files.
-func cleanConfigDir() (string, error) {
-	dst, err := os.MkdirTemp("", "claude-config-*")
-	if err != nil {
-		return "", err
-	}
-
-	if os.Getenv("CI") != "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			src := filepath.Join(home, ".claude", ".claude.json")
-			if _, err := os.Stat(src); err == nil {
-				_ = os.Symlink(src, filepath.Join(dst, ".claude.json"))
-			}
-		}
-	} else {
-		_ = os.WriteFile(filepath.Join(dst, ".claude.json"),
-			[]byte(`{"hasCompletedOnboarding":true}`), 0o644)
-	}
-
-	return dst, nil
-}
-
 // cleanEnv returns os.Environ() with agent-incompatible variables removed.
 // It strips CLAUDECODE (so Claude Code doesn't refuse to start inside this
 // test runner) and ENTIRE_TEST_TTY (so agents exercise the real TTY detection
@@ -165,7 +137,9 @@ func (c *Claude) RunPrompt(ctx context.Context, dir string, prompt string, opts 
 	}, err
 }
 
-func (c *Claude) StartSession(ctx context.Context, dir string) (Session, error) {
+// startSessionCommon contains the shared session startup logic.
+// dismissDialog is called for each dialog screen to handle OS-specific dialogs.
+func (c *Claude) startSessionCommon(dir string, dismissDialog func(s *PTYSession, content string)) (Session, error) {
 	name := fmt.Sprintf("claude-test-%d", time.Now().UnixNano())
 
 	configDir, err := cleanConfigDir()
@@ -208,6 +182,7 @@ func (c *Claude) StartSession(ctx context.Context, dir string) (Session, error) 
 			_ = s.SendKeys("Down")
 			time.Sleep(200 * time.Millisecond)
 		}
+		dismissDialog(s, content)
 		_ = s.SendKeys("Enter")
 		time.Sleep(500 * time.Millisecond)
 	}

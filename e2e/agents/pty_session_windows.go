@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 
 	"github.com/UserExistsError/conpty"
@@ -29,6 +30,11 @@ func (p *conptyProcess) Wait() error {
 // unsetEnv lists environment variable names to strip; extraEnv lists KEY=val
 // entries to add.
 func NewPTYSession(name, dir string, unsetEnv, extraEnv []string, command string, args ...string) (*PTYSession, error) {
+	// ConPTY doesn't resolve bare command names from PATH, so resolve it here.
+	if resolved, err := exec.LookPath(command); err == nil {
+		command = resolved
+	}
+
 	// ConPTY takes a single command line string.
 	cmdLine := command
 	if len(args) > 0 {
