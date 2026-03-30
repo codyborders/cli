@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -474,7 +473,7 @@ func TestResolveLatestCheckpoint(t *testing.T) {
 	// Pass checkpoint IDs in reverse chronological order (newest first),
 	// simulating git CLI squash merge trailer order.
 	reverseOrderIDs := []id.CheckpointID{cpID3, cpID2, cpID1}
-	latest, tree, err := resolveLatestCheckpoint(context.Background(), repo, reverseOrderIDs)
+	latest, tree, _, err := resolveLatestCheckpoint(context.Background(), reverseOrderIDs)
 	if err != nil {
 		t.Fatalf("resolveLatestCheckpoint() error = %v", err)
 	}
@@ -491,7 +490,7 @@ func TestResolveLatestCheckpoint(t *testing.T) {
 
 	// Also verify with chronological order
 	chronologicalIDs := []id.CheckpointID{cpID1, cpID2, cpID3}
-	latest2, _, err := resolveLatestCheckpoint(context.Background(), repo, chronologicalIDs)
+	latest2, _, _, err := resolveLatestCheckpoint(context.Background(), chronologicalIDs)
 	if err != nil {
 		t.Fatalf("resolveLatestCheckpoint() error = %v", err)
 	}
@@ -629,17 +628,13 @@ func TestCheckRemoteMetadata_MetadataExistsOnRemote(t *testing.T) {
 		t.Fatalf("Failed to remove local metadata branch: %v", err)
 	}
 
-	// Call checkRemoteMetadata - should find it on remote and attempt to fetch
-	// In this test environment without a real origin remote, the fetch will fail
-	// but it should return a SilentError (user-friendly error message already printed)
-	err = checkRemoteMetadata(context.Background(), io.Discard, io.Discard, repo, checkpointID)
+	// Call checkRemoteMetadata - should find metadata on the remote tree and
+	// attempt to resume, but fail because the test checkpoint has no agent field.
+	err = checkRemoteMetadata(context.Background(), checkpointID)
 	if err == nil {
-		t.Error("checkRemoteMetadata() should return SilentError when fetch fails")
-	} else {
-		var silentErr *SilentError
-		if !errors.As(err, &silentErr) {
-			t.Errorf("checkRemoteMetadata() should return SilentError, got: %v", err)
-		}
+		t.Error("checkRemoteMetadata() should return error when agent is missing from metadata")
+	} else if !strings.Contains(err.Error(), "failed to resolve agent") {
+		t.Errorf("checkRemoteMetadata() expected agent resolution error, got: %v", err)
 	}
 }
 
@@ -657,7 +652,7 @@ func TestCheckRemoteMetadata_NoRemoteMetadataBranch(t *testing.T) {
 	// Don't create any remote ref - simulating no remote entire/checkpoints/v1
 
 	// Call checkRemoteMetadata - should handle gracefully (no remote branch)
-	err := checkRemoteMetadata(context.Background(), io.Discard, io.Discard, repo, "nonexistent123")
+	err := checkRemoteMetadata(context.Background(), id.MustCheckpointID("aaa111bbb222"))
 	if err != nil {
 		t.Errorf("checkRemoteMetadata() returned error when no remote branch: %v", err)
 	}
@@ -692,13 +687,13 @@ func TestCheckRemoteMetadata_CheckpointNotOnRemote(t *testing.T) {
 	}
 
 	// Call checkRemoteMetadata with a DIFFERENT checkpoint ID (not on remote)
-	err = checkRemoteMetadata(context.Background(), io.Discard, io.Discard, repo, "abcd12345678")
+	err = checkRemoteMetadata(context.Background(), id.MustCheckpointID("abcd12345678"))
 	if err != nil {
 		t.Errorf("checkRemoteMetadata() returned error for missing checkpoint: %v", err)
 	}
 }
 
-func TestResumeFromCurrentBranch_FallsBackToRemote(t *testing.T) {
+func TestResumeFromCurrentBranch_NoMetadataAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
@@ -712,20 +707,10 @@ func TestResumeFromCurrentBranch_FallsBackToRemote(t *testing.T) {
 	sessionID := "2025-01-01-test-session-uuid"
 	checkpointID := createCheckpointOnMetadataBranch(t, repo, sessionID)
 
-	// Copy the local entire/checkpoints/v1 to origin/entire/checkpoints/v1 (simulate remote)
-	localRef, err := repo.Reference(plumbing.NewBranchReferenceName(paths.MetadataBranchName), true)
-	if err != nil {
-		t.Fatalf("Failed to get local metadata branch: %v", err)
-	}
-	remoteRef := plumbing.NewHashReference(
-		plumbing.NewRemoteReferenceName("origin", paths.MetadataBranchName),
-		localRef.Hash(),
-	)
-	if err := repo.Storer.SetReference(remoteRef); err != nil {
-		t.Fatalf("Failed to create remote ref: %v", err)
-	}
-
-	// Delete local entire/checkpoints/v1 branch to simulate "not fetched yet"
+	// Delete local entire/checkpoints/v1 branch to simulate "not fetched yet".
+	// Don't create a remote ref — getMetadataTree falls back to
+	// GetRemoteMetadataBranchTree which reads refs/remotes/origin/... directly,
+	// so a remote ref would let it succeed without a real fetch.
 	if err := repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(paths.MetadataBranchName)); err != nil {
 		t.Fatalf("Failed to remove local metadata branch: %v", err)
 	}
@@ -740,6 +725,7 @@ func TestResumeFromCurrentBranch_FallsBackToRemote(t *testing.T) {
 	}
 
 	commitMsg := "Add feature\n\nEntire-Checkpoint: " + checkpointID.String()
+	var err error
 	_, err = w.Commit(commitMsg, &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "Test User",
@@ -750,17 +736,11 @@ func TestResumeFromCurrentBranch_FallsBackToRemote(t *testing.T) {
 		t.Fatalf("Failed to create commit with checkpoint: %v", err)
 	}
 
-	// Run resumeFromCurrentBranch - should fall back to remote and attempt fetch
-	// In this test environment without a real origin remote, the fetch will fail
-	// but it should return a SilentError (user-friendly error message already printed)
+	// Run resumeFromCurrentBranch - no local or remote metadata branch exists,
+	// so checkRemoteMetadata prints an informational message and returns nil.
 	err = resumeFromCurrentBranch(context.Background(), io.Discard, io.Discard, "master", false)
-	if err == nil {
-		t.Error("resumeFromCurrentBranch() should return SilentError when fetch fails")
-	} else {
-		var silentErr *SilentError
-		if !errors.As(err, &silentErr) {
-			t.Errorf("resumeFromCurrentBranch() should return SilentError, got: %v", err)
-		}
+	if err != nil {
+		t.Errorf("resumeFromCurrentBranch() returned unexpected error: %v", err)
 	}
 }
 

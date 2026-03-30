@@ -400,6 +400,16 @@ func IsSetUpAndEnabled(ctx context.Context) bool {
 	return s.Enabled
 }
 
+// IsCheckpointsV2Enabled checks if checkpoints v2 is enabled in settings.
+// Returns false by default if settings cannot be loaded or the key is missing.
+func IsCheckpointsV2Enabled(ctx context.Context) bool {
+	settings, err := Load(ctx)
+	if err != nil {
+		return false
+	}
+	return settings.IsCheckpointsV2Enabled()
+}
+
 // IsSummarizeEnabled checks if auto-summarize is enabled in settings.
 // Returns false by default if settings cannot be loaded or the key is missing.
 func IsSummarizeEnabled(ctx context.Context) bool {
@@ -467,6 +477,16 @@ func (s *EntireSettings) GetCheckpointRemote() *CheckpointRemoteConfig {
 		return nil
 	}
 	return &CheckpointRemoteConfig{Provider: provider, Repo: repo}
+}
+
+// IsCheckpointsV2Enabled checks if checkpoints v2 (dual-write to refs/entire/) is enabled.
+// Returns false by default if the key is missing or not a bool.
+func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
+	if s.StrategyOptions == nil {
+		return false
+	}
+	val, ok := s.StrategyOptions["checkpoints_v2"].(bool)
+	return ok && val
 }
 
 // IsPushSessionsDisabled checks if push_sessions is disabled in settings.

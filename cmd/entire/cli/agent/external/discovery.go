@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
@@ -13,17 +15,38 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/settings"
 )
 
-const binaryPrefix = "entire-agent-"
+const (
+	binaryPrefix = "entire-agent-"
+	osWindows    = "windows"
+)
+
+// discoveryTimeout caps the total time spent scanning $PATH for external agents.
+const discoveryTimeout = 10 * time.Second
 
 // DiscoverAndRegister scans $PATH for executables matching "entire-agent-<name>",
 // calls their "info" subcommand, and registers them in the agent registry.
 // Binaries whose name conflicts with an already-registered agent are skipped.
 // Errors during discovery are logged but do not prevent other agents from loading.
+// Discovery is skipped when the external_agents setting is not enabled.
 func DiscoverAndRegister(ctx context.Context) {
 	if !settings.IsExternalAgentsEnabled(ctx) {
 		logging.Debug(ctx, "external agent discovery disabled (external_agents not enabled in settings)")
 		return
 	}
+	discoverAndRegister(ctx)
+}
+
+// DiscoverAndRegisterAlways is like DiscoverAndRegister but bypasses the
+// external_agents settings check. Use this in interactive setup flows where
+// the user explicitly chooses agents.
+func DiscoverAndRegisterAlways(ctx context.Context) {
+	discoverAndRegister(ctx)
+}
+
+// discoverAndRegister contains the shared scanning logic for external agent discovery.
+func discoverAndRegister(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
 
 	pathEnv := os.Getenv("PATH")
 	if pathEnv == "" {
@@ -38,18 +61,31 @@ func DiscoverAndRegister(ctx context.Context) {
 
 	seen := make(map[string]bool) // deduplicate binaries across PATH dirs
 	for _, dir := range filepath.SplitList(pathEnv) {
+		if ctx.Err() != nil {
+			logging.Debug(ctx, "external agent discovery timed out")
+			return
+		}
+
 		matches, err := filepath.Glob(filepath.Join(dir, binaryPrefix+"*"))
 		if err != nil {
 			continue // skip unreadable directories
 		}
 		for _, binPath := range matches {
+			if ctx.Err() != nil {
+				logging.Debug(ctx, "external agent discovery timed out")
+				return
+			}
+
 			name := filepath.Base(binPath)
 			if seen[name] {
 				continue
 			}
 			seen[name] = true
 
-			agentName := types.AgentName(strings.TrimPrefix(name, binaryPrefix))
+			// Strip Windows executable extensions (.exe, .bat) before deriving agent name.
+			// On Unix, binaries have no extension, so this is a no-op.
+			cleanName := stripExeExt(name)
+			agentName := types.AgentName(strings.TrimPrefix(cleanName, binaryPrefix))
 			if registered[agentName] {
 				logging.Debug(ctx, "skipping external agent (name conflict with built-in)",
 					slog.String("binary", name),
@@ -61,8 +97,8 @@ func DiscoverAndRegister(ctx context.Context) {
 			if err != nil || finfo.IsDir() {
 				continue
 			}
-			// Check executable bit (on Unix)
-			if finfo.Mode()&0o111 == 0 {
+			// Check executable bit (on Unix; Windows doesn't set execute bits)
+			if runtime.GOOS != osWindows && finfo.Mode()&0o111 == 0 {
 				continue
 			}
 
@@ -93,4 +129,15 @@ func DiscoverAndRegister(ctx context.Context) {
 				slog.String("binary", binPath))
 		}
 	}
+}
+
+// stripExeExt removes Windows executable extensions (.exe, .bat, .cmd) from a
+// file name so that the agent name derived from the binary matches on all platforms.
+// On Unix this is effectively a no-op because binaries have no extension.
+func stripExeExt(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".exe", ".bat", ".cmd":
+		return strings.TrimSuffix(name, filepath.Ext(name))
+	}
+	return name
 }

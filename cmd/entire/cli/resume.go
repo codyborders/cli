@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/external"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
@@ -50,6 +51,10 @@ most recent commit with a checkpoint.  You'll be prompted to confirm resuming in
 			if checkDisabledGuard(cmd.Context(), cmd.OutOrStdout()) {
 				return nil
 			}
+
+			// Discover external agents so checkpoints from external agents can be resolved.
+			external.DiscoverAndRegister(cmd.Context())
+
 			return runResume(cmd.Context(), cmd, args[0], force)
 		},
 	}
@@ -125,6 +130,8 @@ func runResume(ctx context.Context, cmd *cobra.Command, branchName string, force
 }
 
 func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName string, force bool) error {
+	logCtx := logging.WithComponent(ctx, "resume")
+
 	repo, err := openRepository(ctx)
 	if err != nil {
 		return fmt.Errorf("not a git repository: %w", err)
@@ -139,6 +146,13 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 		fmt.Fprintf(w, "No Entire checkpoint found on branch '%s'\n", branchName)
 		return nil
 	}
+
+	logging.Debug(logCtx, "found checkpoint(s) on branch",
+		slog.String("branch", branchName),
+		slog.Int("checkpoint_count", len(result.checkpointIDs)),
+		slog.String("commit", result.commitHash[:7]),
+		slog.Bool("newer_commits_exist", result.newerCommitsExist),
+	)
 
 	// If there are newer commits without checkpoints, ask for confirmation.
 	// Merge commits (e.g., from merging main) don't count as "work" and are skipped silently.
@@ -163,87 +177,259 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 	// resolveLatestCheckpoint also returns the metadata tree so we can reuse it
 	// for the ReadCheckpointMetadata call below without a redundant lookup.
 	var metadataTree *object.Tree
+	var freshRepo *git.Repository
 	if len(result.checkpointIDs) > 1 {
-		latest, tree, err := resolveLatestCheckpoint(ctx, repo, result.checkpointIDs)
+		latest, tree, latestRepo, err := resolveLatestCheckpoint(ctx, result.checkpointIDs)
 		if err != nil {
 			// No metadata available — nothing to resume from
+			logging.Warn(logCtx, "resolveLatestCheckpoint failed",
+				slog.Int("checkpoint_count", len(result.checkpointIDs)),
+				slog.String("error", err.Error()),
+			)
 			fmt.Fprintf(w, "Found %d checkpoints for commit %s but metadata is not available\n",
 				len(result.checkpointIDs), result.commitHash[:7])
-			return checkRemoteMetadata(ctx, w, errW, repo, result.checkpointIDs[0])
+			return checkRemoteMetadata(ctx, result.checkpointIDs[0])
 		}
 		skipped := len(result.checkpointIDs) - 1
 		fmt.Fprintf(w, "Found %d checkpoints for commit %s, resuming from the latest (%d older checkpoints skipped)\n",
 			len(result.checkpointIDs), result.commitHash[:7], skipped)
 		checkpointID = latest
 		metadataTree = tree
+		freshRepo = latestRepo
 	}
 
 	// Get metadata branch tree for lookups (reuse from resolveLatestCheckpoint if available)
 	if metadataTree == nil {
-		var err error
-		metadataTree, err = strategy.GetMetadataBranchTree(repo)
-		if err != nil {
-			// No local metadata branch, check if remote has it
-			return checkRemoteMetadata(ctx, w, errW, repo, checkpointID)
+		var treeErr error
+		metadataTree, freshRepo, treeErr = getMetadataTree(ctx)
+		if treeErr != nil {
+			logging.Warn(logCtx, "getMetadataTree failed, checking remote",
+				slog.String("checkpoint_id", checkpointID.String()),
+				slog.String("error", treeErr.Error()),
+			)
+			// All fetch attempts failed, check if remote has it
+			return checkRemoteMetadata(ctx, checkpointID)
 		}
 	}
 
-	// Look up metadata from sharded path
-	metadata, err := strategy.ReadCheckpointMetadata(metadataTree, checkpointID.Path())
-	if err != nil {
-		// Checkpoint exists in commit but no local metadata - check remote
-		return checkRemoteMetadata(ctx, w, errW, repo, checkpointID)
+	logging.Debug(logCtx, "metadata tree obtained",
+		slog.String("checkpoint_id", checkpointID.String()),
+		slog.String("checkpoint_path", checkpointID.Path()),
+		slog.String("tree_hash", metadataTree.Hash.String()),
+	)
+
+	// Navigate to the checkpoint subtree first (uses tree objects only, no blobs).
+	// This scopes the FetchingTree to only this checkpoint's files instead of
+	// the entire metadata branch.
+	cpSubtree, cpErr := metadataTree.Tree(checkpointID.Path())
+	if cpErr != nil {
+		logging.Warn(logCtx, "checkpoint subtree not found in metadata tree",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("checkpoint_path", checkpointID.Path()),
+			slog.String("tree_hash", metadataTree.Hash.String()),
+			slog.String("error", cpErr.Error()),
+		)
+		return checkRemoteMetadata(ctx, checkpointID)
 	}
+
+	// Log subtree details for diagnostics
+	var subtreeEntryNames []string
+	for _, e := range cpSubtree.Entries {
+		subtreeEntryNames = append(subtreeEntryNames, fmt.Sprintf("%s(%s:%s)", e.Name, e.Mode, e.Hash.String()[:7]))
+	}
+	logging.Debug(logCtx, "checkpoint subtree found",
+		slog.String("checkpoint_id", checkpointID.String()),
+		slog.String("subtree_hash", cpSubtree.Hash.String()),
+		slog.Int("entry_count", len(cpSubtree.Entries)),
+		slog.Any("entries", subtreeEntryNames),
+	)
+
+	// Wrap the checkpoint subtree with on-demand blob fetching.
+	// Use the fresh repo's storer (not the original repo) because a fetch may have
+	// created new packfiles that the original repo's storer doesn't know about.
+	ft := checkpoint.NewFetchingTree(ctx, cpSubtree, freshRepo.Storer, FetchBlobsByHash)
+
+	// Batch-prefetch all missing blobs in one network round-trip instead of
+	// fetching one blob per File() call during metadata reads.
+	if prefetched, pfErr := ft.PreFetch(); pfErr != nil {
+		logging.Warn(logCtx, "PreFetch failed, falling back to per-blob fetching",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", pfErr.Error()),
+		)
+	} else if prefetched > 0 {
+		logging.Debug(logCtx, "PreFetch completed",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.Int("blobs_fetched", prefetched),
+		)
+	}
+
+	// Read metadata from checkpoint subtree (paths are relative to checkpoint root)
+	metadata, err := strategy.ReadCheckpointMetadataFromSubtree(ft, checkpointID.Path())
+	if err != nil {
+		logging.Warn(logCtx, "ReadCheckpointMetadataFromSubtree failed, checking remote",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("subtree_hash", cpSubtree.Hash.String()),
+			slog.String("error", err.Error()),
+		)
+		return checkRemoteMetadata(ctx, checkpointID)
+	}
+
+	logging.Debug(logCtx, "checkpoint metadata read successfully",
+		slog.String("checkpoint_id", checkpointID.String()),
+		slog.String("session_id", metadata.SessionID),
+		slog.Int("session_count", metadata.SessionCount),
+	)
 
 	return resumeSession(ctx, w, errW, metadata, force)
 }
 
 // resolveLatestCheckpoint reads metadata for each checkpoint ID and returns
-// the one with the latest CreatedAt, along with the metadata tree for reuse.
-// It tries the local metadata branch first, then fetches from remote, then
-// falls back to the remote tree directly.
-func resolveLatestCheckpoint(ctx context.Context, repo *git.Repository, checkpointIDs []id.CheckpointID) (id.CheckpointID, *object.Tree, error) {
-	metadataTree, err := getMetadataTree(ctx, repo)
+// the one with the latest CreatedAt, along with the metadata tree and fresh
+// repo for reuse. It tries the local metadata branch first, then fetches from
+// remote, then falls back to the remote tree directly.
+func resolveLatestCheckpoint(ctx context.Context, checkpointIDs []id.CheckpointID) (id.CheckpointID, *object.Tree, *git.Repository, error) {
+	metadataTree, freshRepo, err := getMetadataTree(ctx)
 	if err != nil {
-		return id.EmptyCheckpointID, nil, err
+		return id.EmptyCheckpointID, nil, nil, err
 	}
+
 	infoMap := make(map[id.CheckpointID]strategy.CheckpointInfo, len(checkpointIDs))
 	for _, cpID := range checkpointIDs {
-		metadata, err := strategy.ReadCheckpointMetadata(metadataTree, cpID.Path())
-		if err != nil {
+		// Navigate to each checkpoint's subtree, wrap with blob fetching
+		cpSubtree, cpErr := metadataTree.Tree(cpID.Path())
+		if cpErr != nil {
+			logging.Debug(ctx, "resolveLatestCheckpoint: checkpoint subtree not found",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", cpErr.Error()),
+			)
+			continue
+		}
+		ft := checkpoint.NewFetchingTree(ctx, cpSubtree, freshRepo.Storer, FetchBlobsByHash)
+		// Batch-prefetch blobs for this checkpoint subtree.
+		if _, pfErr := ft.PreFetch(); pfErr != nil {
+			logging.Debug(ctx, "resolveLatestCheckpoint: PreFetch failed",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", pfErr.Error()),
+			)
+		}
+		metadata, metaErr := strategy.ReadCheckpointMetadataFromSubtree(ft, cpID.Path())
+		if metaErr != nil {
+			logging.Debug(ctx, "resolveLatestCheckpoint: checkpoint metadata read failed",
+				slog.String("checkpoint_id", cpID.String()),
+				slog.String("error", metaErr.Error()),
+			)
 			continue
 		}
 		infoMap[cpID] = *metadata
 	}
 	latest, found := strategy.ResolveLatestCheckpointFromMap(checkpointIDs, infoMap)
 	if !found {
-		return id.EmptyCheckpointID, nil, errors.New("no checkpoint metadata found")
+		return id.EmptyCheckpointID, nil, nil, errors.New("no checkpoint metadata found")
 	}
-	return latest.CheckpointID, metadataTree, nil
+	return latest.CheckpointID, metadataTree, freshRepo, nil
 }
 
-// getMetadataTree returns the metadata branch tree, trying local first,
-// then fetching from remote, then falling back to the remote tree directly.
-func getMetadataTree(ctx context.Context, repo *git.Repository) (*object.Tree, error) {
-	metadataTree, err := strategy.GetMetadataBranchTree(repo)
-	if err == nil {
-		return metadataTree, nil
-	}
+// getMetadataTree returns the metadata branch tree and a fresh repo handle.
+// After a fetch, go-git's storer cache may be stale (new packfiles on disk
+// are invisible to the repo opened before the fetch). To avoid this, each
+// attempt opens a fresh repo after the fetch succeeds.
+//
+// Fallback order: treeless fetch → local → full fetch → remote tree.
+func getMetadataTree(ctx context.Context) (*object.Tree, *git.Repository, error) {
+	logCtx := logging.WithComponent(ctx, "resume.getMetadataTree")
 
-	// Try fetching from remote
-	if fetchErr := FetchMetadataBranch(ctx); fetchErr == nil {
-		metadataTree, err = strategy.GetMetadataBranchTree(repo)
-		if err == nil {
-			return metadataTree, nil
+	// Helper to log ref hash for a repo's metadata branch
+	logRefHash := func(repo *git.Repository, source string) {
+		ref, refErr := repo.Reference(plumbing.NewBranchReferenceName("entire/checkpoints/v1"), true)
+		if refErr != nil {
+			logging.Debug(logCtx, "metadata branch ref not found",
+				slog.String("source", source),
+				slog.String("error", refErr.Error()),
+			)
+			return
 		}
+		logging.Debug(logCtx, "metadata branch ref resolved",
+			slog.String("source", source),
+			slog.String("ref_hash", ref.Hash().String()),
+		)
 	}
 
-	// Try remote tree directly
-	remoteTree, remoteErr := strategy.GetRemoteMetadataBranchTree(repo)
-	if remoteErr != nil {
-		return nil, fmt.Errorf("metadata branch not available: %w", remoteErr)
+	// Always try treeless fetch first to ensure local branch is up-to-date
+	if fetchErr := FetchMetadataTreeOnly(ctx); fetchErr == nil {
+		// Open a fresh repo so the storer sees new packfiles from the fetch
+		freshRepo, repoErr := openRepository(ctx)
+		if repoErr == nil {
+			logRefHash(freshRepo, "treeless-fetch")
+			metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo)
+			if treeErr == nil {
+				logging.Debug(logCtx, "metadata tree obtained via treeless fetch",
+					slog.String("tree_hash", metadataTree.Hash.String()),
+				)
+				return metadataTree, freshRepo, nil
+			}
+			logging.Debug(logCtx, "treeless fetch succeeded but tree read failed",
+				slog.String("error", treeErr.Error()),
+			)
+		}
+	} else {
+		logging.Debug(logCtx, "treeless fetch failed, trying local",
+			slog.String("error", fetchErr.Error()),
+		)
 	}
-	return remoteTree, nil
+
+	// Try local (may have been set by a prior fetch or push)
+	localRepo, repoErr := openRepository(ctx)
+	if repoErr == nil {
+		logRefHash(localRepo, "local")
+		metadataTree, err := strategy.GetMetadataBranchTree(localRepo)
+		if err == nil {
+			logging.Debug(logCtx, "metadata tree obtained from local branch",
+				slog.String("tree_hash", metadataTree.Hash.String()),
+			)
+			return metadataTree, localRepo, nil
+		}
+		logging.Debug(logCtx, "local metadata branch not available",
+			slog.String("error", err.Error()),
+		)
+	}
+
+	// Fallback: full fetch from remote
+	if fetchErr := FetchMetadataBranch(ctx); fetchErr == nil {
+		freshRepo, repoErr := openRepository(ctx)
+		if repoErr == nil {
+			logRefHash(freshRepo, "full-fetch")
+			metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo)
+			if treeErr == nil {
+				logging.Debug(logCtx, "metadata tree obtained via full fetch",
+					slog.String("tree_hash", metadataTree.Hash.String()),
+				)
+				return metadataTree, freshRepo, nil
+			}
+			logging.Debug(logCtx, "full fetch succeeded but tree read failed",
+				slog.String("error", treeErr.Error()),
+			)
+		}
+	} else {
+		logging.Debug(logCtx, "full fetch failed",
+			slog.String("error", fetchErr.Error()),
+		)
+	}
+
+	// Try remote tree directly (origin/entire/checkpoints/v1)
+	remoteRepo, repoErr := openRepository(ctx)
+	if repoErr != nil {
+		return nil, nil, fmt.Errorf("failed to open repository: %w", repoErr)
+	}
+	logRefHash(remoteRepo, "remote-tracking")
+	remoteTree, remoteErr := strategy.GetRemoteMetadataBranchTree(remoteRepo)
+	if remoteErr != nil {
+		logging.Debug(logCtx, "remote metadata tree also not available",
+			slog.String("error", remoteErr.Error()),
+		)
+		return nil, nil, fmt.Errorf("metadata branch not available: %w", remoteErr)
+	}
+	logging.Debug(logCtx, "metadata tree obtained from remote-tracking branch")
+	return remoteTree, remoteRepo, nil
 }
 
 // branchCheckpointsResult contains the result of searching for checkpoints on a branch.
@@ -399,32 +585,56 @@ func promptResumeFromOlderCheckpoint() (bool, error) {
 
 // checkRemoteMetadata checks if checkpoint metadata exists on origin/entire/checkpoints/v1
 // and automatically fetches it if available.
-func checkRemoteMetadata(ctx context.Context, w, errW io.Writer, repo *git.Repository, checkpointID id.CheckpointID) error {
+func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) error {
+	logCtx := logging.WithComponent(ctx, "resume.checkRemoteMetadata")
+
+	// Open a fresh repo to avoid stale packfile index issues
+	repo, repoErr := openRepository(ctx)
+	if repoErr != nil {
+		logging.Warn(logCtx, "failed to open repository for remote check",
+			slog.String("error", repoErr.Error()),
+		)
+		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but session metadata not available\n", checkpointID)
+		return nil
+	}
+
 	// Try to get remote metadata branch tree
 	remoteTree, err := strategy.GetRemoteMetadataBranchTree(repo)
 	if err != nil {
-		fmt.Fprintf(w, "Checkpoint '%s' found in commit but session metadata not available\n", checkpointID)
-		fmt.Fprintf(w, "The entire/checkpoints/v1 branch may not exist locally or on the remote.\n")
+		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but the entire/checkpoints/v1 branch is not available locally or on the remote.\n", checkpointID)
+		fmt.Fprintf(os.Stderr, "This can happen if the metadata branch was not pushed. Try:\n")
+		fmt.Fprintf(os.Stderr, "  git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
 		return nil //nolint:nilerr // Informational message, not a fatal error
 	}
 
-	// Check if the checkpoint exists on the remote
-	metadata, err := strategy.ReadCheckpointMetadata(remoteTree, checkpointID.Path())
+	// Navigate to checkpoint subtree, then wrap with blob fetching
+	cpSubtree, cpErr := remoteTree.Tree(checkpointID.Path())
+	if cpErr != nil {
+		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but its metadata could not be read from entire/checkpoints/v1.\n", checkpointID)
+		fmt.Fprintf(os.Stderr, "The metadata branch exists but checkpoint content may be missing or unreadable (e.g. after a partial fetch).\n")
+		fmt.Fprintf(os.Stderr, "Try a full fetch:\n")
+		fmt.Fprintf(os.Stderr, "  git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
+		return nil //nolint:nilerr // Informational message, not a fatal error
+	}
+	ft := checkpoint.NewFetchingTree(ctx, cpSubtree, repo.Storer, FetchBlobsByHash)
+	// Batch-prefetch blobs for the remote checkpoint subtree.
+	if _, pfErr := ft.PreFetch(); pfErr != nil {
+		logging.Debug(ctx, "checkRemoteMetadata: PreFetch failed",
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", pfErr.Error()),
+		)
+	}
+	metadata, err := strategy.ReadCheckpointMetadataFromSubtree(ft, checkpointID.Path())
 	if err != nil {
-		fmt.Fprintf(w, "Checkpoint '%s' found in commit but session metadata not available\n", checkpointID)
+		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but its metadata could not be read from entire/checkpoints/v1.\n", checkpointID)
+		fmt.Fprintf(os.Stderr, "The metadata branch exists but checkpoint content may be missing or unreadable (e.g. after a partial fetch).\n")
+		fmt.Fprintf(os.Stderr, "Try a full fetch:\n")
+		fmt.Fprintf(os.Stderr, "  git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
 		return nil //nolint:nilerr // Informational message, not a fatal error
 	}
 
-	// Metadata exists on remote but not locally - fetch it automatically
-	fmt.Fprintf(w, "Fetching session metadata from origin...\n")
-	if err := FetchMetadataBranch(ctx); err != nil {
-		fmt.Fprintf(errW, "Error: failed to fetch metadata: %v\n", err)
-		fmt.Fprintf(errW, "You can try manually: git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
-		return NewSilentError(errors.New("failed to fetch metadata"))
-	}
-
-	// Now resume the session with the fetched metadata
-	return resumeSession(ctx, w, errW, metadata, false)
+	// Metadata exists on remote — resume the session
+	return resumeSession(ctx, os.Stdout, os.Stderr, metadata, false)
 }
 
 // resumeSession restores and displays the resume command for a specific session.

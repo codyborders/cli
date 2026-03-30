@@ -109,6 +109,23 @@ func (env *TestEnv) Cleanup() {
 	// No-op - temp dirs are cleaned up by t.TempDir()
 }
 
+// gitEmptyConfigPath returns the path to an empty file suitable for use as
+// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM. We use an empty file instead of
+// os.DevNull because git on Windows cannot open NUL as a config file.
+var gitEmptyConfig string
+
+func gitEmptyConfigPath() string {
+	if gitEmptyConfig == "" {
+		f, err := os.CreateTemp("", "git-empty-config-*")
+		if err != nil {
+			panic("create empty git config: " + err.Error())
+		}
+		f.Close()
+		gitEmptyConfig = f.Name()
+	}
+	return gitEmptyConfig
+}
+
 // cliEnv returns the environment variables for CLI execution.
 // Includes Claude, Gemini, and OpenCode project dirs so tests work for any agent.
 // Delegates to testutil.GitIsolatedEnv() for git config isolation.
@@ -217,6 +234,9 @@ func (env *TestEnv) InitRepo() {
 		cfg.Raw = config.New()
 	}
 	cfg.Raw.Section("commit").SetOption("gpgsign", "false")
+
+	// Override any global core.hooksPath so tests use the repo-local hooks directory.
+	cfg.Raw.Section("core").SetOption("hooksPath", filepath.Join(env.RepoDir, ".git", "hooks"))
 
 	if err := repo.SetConfig(cfg); err != nil {
 		env.T.Fatalf("failed to set repo config: %v", err)
@@ -849,6 +869,59 @@ func (env *TestEnv) ReadFileFromBranch(branchName, filePath string) (string, boo
 	}
 
 	return content, true
+}
+
+// ReadFileFromRef reads a file's content from a specific ref's tree.
+// Unlike ReadFileFromBranch, this takes a full ref name (e.g., "refs/entire/checkpoints/v2/main")
+// and does not prepend "refs/heads/".
+// Returns the content and true if found, empty string and false if not found.
+func (env *TestEnv) ReadFileFromRef(refName, filePath string) (string, bool) {
+	env.T.Helper()
+
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		env.T.Fatalf("failed to open git repo: %v", err)
+	}
+
+	ref, err := repo.Reference(plumbing.ReferenceName(refName), true)
+	if err != nil {
+		return "", false
+	}
+
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return "", false
+	}
+
+	tree, err := commit.Tree()
+	if err != nil {
+		return "", false
+	}
+
+	file, err := tree.File(filePath)
+	if err != nil {
+		return "", false
+	}
+
+	content, err := file.Contents()
+	if err != nil {
+		return "", false
+	}
+
+	return content, true
+}
+
+// RefExists checks if a ref exists in the repository.
+func (env *TestEnv) RefExists(refName string) bool {
+	env.T.Helper()
+
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		env.T.Fatalf("failed to open git repo: %v", err)
+	}
+
+	_, err = repo.Reference(plumbing.ReferenceName(refName), true)
+	return err == nil
 }
 
 // GetLatestCommitMessageOnBranch returns the commit message of the latest commit on the given branch.

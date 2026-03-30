@@ -1,16 +1,18 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
 
-	apiurl "github.com/entireio/cli/cmd/entire/cli/api"
+	"github.com/entireio/cli/cmd/entire/cli/api"
 	"github.com/entireio/cli/cmd/entire/cli/auth"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +34,6 @@ type deviceAuthClient interface {
 }
 
 func newLoginCmd() *cobra.Command {
-	var printBrowserURL bool
 	var insecureHTTPAuth bool
 
 	cmd := &cobra.Command{
@@ -42,45 +43,49 @@ func newLoginCmd() *cobra.Command {
 			client := auth.NewClient(nil)
 
 			if !insecureHTTPAuth {
-				if err := apiurl.RequireSecureURL(client.BaseURL()); err != nil {
+				if err := api.RequireSecureURL(client.BaseURL()); err != nil {
 					return fmt.Errorf("base URL check: %w", err)
 				}
 			}
 
-			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser, printBrowserURL)
+			return runLogin(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, openBrowser)
 		},
 	}
 
-	cmd.Flags().BoolVar(&printBrowserURL, "print-browser-url", false, "Print the approval URL instead of opening a browser")
 	cmd.Flags().BoolVar(&insecureHTTPAuth, "insecure-http-auth", false, "Allow authentication over plain HTTP (insecure, for local development only)")
-	cmd.Flags().MarkHidden("insecure-http-auth") //nolint:errcheck,gosec // flag is defined above
+	if err := cmd.Flags().MarkHidden("insecure-http-auth"); err != nil {
+		panic(fmt.Sprintf("hide insecure-http-auth flag: %v", err))
+	}
 
 	return cmd
 }
 
-func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc, printBrowserURL bool) error {
+func runLogin(ctx context.Context, outW, errW io.Writer, client deviceAuthClient, openURL browserOpenFunc) error {
 	start, err := client.StartDeviceAuth(ctx)
 	if err != nil {
 		return fmt.Errorf("start login: %w", err)
 	}
 
 	fmt.Fprintf(outW, "Device code: %s\n", start.UserCode)
-	approvalURL := start.VerificationURIComplete
-	if approvalURL == "" {
-		approvalURL = start.VerificationURI
-	}
 
-	fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
+	approvalURL := start.VerificationURI
 
-	if printBrowserURL {
-		fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
-	} else {
-		if err := openURL(ctx, approvalURL); err != nil {
-			fmt.Fprintf(errW, "Warning: failed to open browser automatically: %v\n", err)
-			fmt.Fprintln(outW, "Open the approval URL in your browser to continue.")
-		} else {
-			fmt.Fprintln(outW, "Opened your browser for approval.")
+	if canPromptInteractively() {
+		fmt.Fprintf(outW, "Press Enter to open %s in your browser and enter the generated device code...", approvalURL)
+
+		// Read from /dev/tty so we get a real keypress and don't consume piped stdin.
+		if err := waitForEnter(ctx); err != nil {
+			return fmt.Errorf("wait for input: %w", err)
 		}
+
+		fmt.Fprintln(outW)
+
+		if err := openURL(ctx, approvalURL); err != nil {
+			fmt.Fprintf(errW, "Warning: failed to open browser: %v\n", err)
+			fmt.Fprintf(outW, "Open the approval URL in your browser to continue and enter the generated device code: %s\n", approvalURL)
+		}
+	} else {
+		fmt.Fprintf(outW, "Approval URL: %s\n", approvalURL)
 	}
 
 	fmt.Fprintln(outW, "Waiting for approval...")
@@ -160,6 +165,33 @@ func waitForApproval(ctx context.Context, poller deviceAuthClient, deviceCode st
 			return "", fmt.Errorf("wait for approval: %w", ctx.Err())
 		case <-time.After(pollInterval):
 		}
+	}
+}
+
+// waitForEnter reads a line from /dev/tty, blocking until the user presses Enter.
+// If /dev/tty cannot be opened (e.g. on Windows), it returns immediately.
+// Returns ctx.Err() if the context is cancelled before the user presses Enter.
+func waitForEnter(ctx context.Context) error {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return nil //nolint:nilerr // tty unavailable (e.g. Windows) — skip prompt silently
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(tty)
+		_, err := reader.ReadString('\n')
+		done <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Close tty to unblock the reading goroutine.
+		_ = tty.Close()
+		return fmt.Errorf("interrupted: %w", ctx.Err())
+	case <-done:
+		_ = tty.Close()
+		return nil
 	}
 }
 

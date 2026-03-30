@@ -3397,6 +3397,121 @@ func TestCondenseSession_GeminiMultiCheckpoint(t *testing.T) {
 	}
 }
 
+func TestCondenseSession_CopilotScopedCheckpointMetadataAndSessionBackfill(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("failed to init repo: %v", err)
+	}
+
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get worktree: %v", err)
+	}
+
+	initialHash, err := worktree.Commit("Initial commit", &git.CommitOptions{
+		Author:            &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+		AllowEmptyCommits: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create initial commit: %v", err)
+	}
+
+	t.Chdir(dir)
+
+	sessionID := "2026-03-17-copilot-token-scope"
+	transcriptDir := filepath.Join(dir, ".copilot", "session-state", sessionID)
+	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+		t.Fatalf("failed to create transcript dir: %v", err)
+	}
+	transcriptPath := filepath.Join(transcriptDir, "events.jsonl")
+
+	transcript := strings.Join([]string{
+		`{"type":"session.start","data":{"sessionId":"2026-03-17-copilot-token-scope"},"id":"1","timestamp":"2026-03-17T00:00:00Z","parentId":""}`,
+		`{"type":"session.model_change","data":{"newModel":"claude-sonnet-4.6"},"id":"2","timestamp":"2026-03-17T00:00:01Z","parentId":"1"}`,
+		`{"type":"user.message","data":{"content":"Create alpha.txt"},"id":"3","timestamp":"2026-03-17T00:00:02Z","parentId":""}`,
+		`{"type":"assistant.message","data":{"content":"Created alpha.txt","outputTokens":10},"id":"4","timestamp":"2026-03-17T00:00:03Z","parentId":"3"}`,
+		`{"type":"tool.execution_complete","data":{"toolCallId":"tool-1","model":"claude-sonnet-4.6","toolTelemetry":{"properties":{"filePaths":"[\"alpha.txt\"]"},"metrics":{"linesAdded":1,"linesRemoved":0}}},"id":"5","timestamp":"2026-03-17T00:00:04Z","parentId":"4"}`,
+		`{"type":"user.message","data":{"content":"Create beta.txt"},"id":"6","timestamp":"2026-03-17T00:00:05Z","parentId":""}`,
+		`{"type":"assistant.message","data":{"content":"Created beta.txt","outputTokens":25},"id":"7","timestamp":"2026-03-17T00:00:06Z","parentId":"6"}`,
+		`{"type":"tool.execution_complete","data":{"toolCallId":"tool-2","model":"claude-sonnet-4.6","toolTelemetry":{"properties":{"filePaths":"[\"beta.txt\"]"},"metrics":{"linesAdded":1,"linesRemoved":0}}},"id":"8","timestamp":"2026-03-17T00:00:07Z","parentId":"7"}`,
+		`{"type":"session.shutdown","data":{"modelMetrics":{"claude-sonnet-4.6":{"requests":{"count":2},"usage":{"inputTokens":0,"outputTokens":35,"cacheReadTokens":20,"cacheWriteTokens":10}}}},"id":"9","timestamp":"2026-03-17T00:00:08Z","parentId":""}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("failed to write transcript: %v", err)
+	}
+
+	state := &SessionState{
+		SessionID:                 sessionID,
+		BaseCommit:                initialHash.String(),
+		StartedAt:                 time.Now(),
+		FilesTouched:              []string{"beta.txt"},
+		WorktreePath:              dir,
+		TranscriptPath:            transcriptPath,
+		AgentType:                 agent.AgentTypeCopilotCLI,
+		ModelName:                 "claude-sonnet-4.6",
+		CheckpointTranscriptStart: 5,
+	}
+
+	s := &ManualCommitStrategy{}
+	checkpointID := id.MustCheckpointID("cc11aa22bb33")
+	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
+	if err != nil {
+		t.Fatalf("CondenseSession() error = %v", err)
+	}
+
+	if result.CheckpointID != checkpointID {
+		t.Errorf("CheckpointID = %v, want %v", result.CheckpointID, checkpointID)
+	}
+	if len(result.FilesTouched) != 1 || result.FilesTouched[0] != "beta.txt" {
+		t.Errorf("FilesTouched = %v, want [beta.txt]", result.FilesTouched)
+	}
+
+	store := checkpoint.NewGitStore(repo)
+	content, err := store.ReadLatestSessionContent(t.Context(), checkpointID)
+	if err != nil {
+		t.Fatalf("ReadLatestSessionContent() error = %v", err)
+	}
+
+	if content.Metadata.TokenUsage == nil {
+		t.Fatal("TokenUsage should not be nil")
+	}
+	if content.Metadata.TokenUsage.InputTokens != 0 {
+		t.Errorf("metadata InputTokens = %d, want 0 for scoped Copilot checkpoint usage", content.Metadata.TokenUsage.InputTokens)
+	}
+	if content.Metadata.TokenUsage.OutputTokens != 25 {
+		t.Errorf("metadata OutputTokens = %d, want 25 for second checkpoint assistant output", content.Metadata.TokenUsage.OutputTokens)
+	}
+	if content.Metadata.TokenUsage.CacheReadTokens != 0 {
+		t.Errorf("metadata CacheReadTokens = %d, want 0 for scoped fallback path", content.Metadata.TokenUsage.CacheReadTokens)
+	}
+	if content.Metadata.TokenUsage.CacheCreationTokens != 0 {
+		t.Errorf("metadata CacheCreationTokens = %d, want 0 for scoped fallback path", content.Metadata.TokenUsage.CacheCreationTokens)
+	}
+	if content.Metadata.TokenUsage.APICallCount != 1 {
+		t.Errorf("metadata APICallCount = %d, want 1", content.Metadata.TokenUsage.APICallCount)
+	}
+
+	if state.TokenUsage == nil {
+		t.Fatal("state.TokenUsage should not be nil after Copilot session backfill")
+	}
+	if state.TokenUsage.InputTokens != 0 {
+		t.Errorf("state InputTokens = %d, want 0 from session.shutdown", state.TokenUsage.InputTokens)
+	}
+	if state.TokenUsage.OutputTokens != 35 {
+		t.Errorf("state OutputTokens = %d, want 35 from session.shutdown", state.TokenUsage.OutputTokens)
+	}
+	if state.TokenUsage.CacheReadTokens != 20 {
+		t.Errorf("state CacheReadTokens = %d, want 20 from session.shutdown", state.TokenUsage.CacheReadTokens)
+	}
+	if state.TokenUsage.CacheCreationTokens != 10 {
+		t.Errorf("state CacheCreationTokens = %d, want 10 from session.shutdown", state.TokenUsage.CacheCreationTokens)
+	}
+	if state.TokenUsage.APICallCount != 2 {
+		t.Errorf("state APICallCount = %d, want 2 from session.shutdown", state.TokenUsage.APICallCount)
+	}
+}
+
 // TestCondenseSession_FilesTouchedFallback_EmptyState verifies that when state.FilesTouched
 // is empty (mid-session commit before SaveStep), the fallback to committedFiles works.
 // This is the legitimate use case for the fallback.
@@ -3759,4 +3874,180 @@ func TestResolveFilesTouched_PrefersStateFallsBackToTranscript(t *testing.T) {
 			t.Errorf("resolveFilesTouched with no sources = %v, want nil", files)
 		}
 	})
+}
+
+// TestCondenseSession_V2DualWrite verifies that when checkpoints_v2 is enabled,
+// CondenseSession writes to both v1 (entire/checkpoints/v1) and v2 refs
+// (refs/entire/checkpoints/v2/main and refs/entire/checkpoints/v2/full/current).
+func TestCondenseSession_V2DualWrite(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+
+	worktree, err := repo.Worktree()
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644))
+	_, err = worktree.Add("main.go")
+	require.NoError(t, err)
+	commitHash, err := worktree.Commit("Initial commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+	})
+	require.NoError(t, err)
+
+	t.Chdir(dir)
+
+	// Enable checkpoints_v2 via settings
+	entireDir := filepath.Join(dir, ".entire")
+	require.NoError(t, os.MkdirAll(entireDir, 0o755))
+	settingsJSON := `{"enabled": true, "strategy": "manual-commit", "strategy_options": {"checkpoints_v2": true}}`
+	require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsJSON), 0o644))
+
+	s := &ManualCommitStrategy{}
+	sessionID := "2025-01-15-test-v2-dual-write"
+
+	// Create metadata directory with transcript
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	transcript := `{"type":"human","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":"hi there"}}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(metadataDirAbs, paths.TranscriptFileName), []byte(transcript), 0o644))
+
+	// SaveStep to create shadow branch
+	err = s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{"main.go"},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint 1",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.TranscriptPath = filepath.Join(metadataDirAbs, paths.TranscriptFileName)
+	state.BaseCommit = commitHash.String()[:7]
+
+	checkpointID := id.MustCheckpointID("dd11ee22ff33")
+	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// v1 branch should exist (as before)
+	v1Ref, err := repo.Reference(plumbing.NewBranchReferenceName(paths.MetadataBranchName), true)
+	require.NoError(t, err, "v1 metadata branch should exist")
+	require.NotEqual(t, plumbing.ZeroHash, v1Ref.Hash())
+
+	// v2 /main ref should exist
+	v2MainRef, err := repo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
+	require.NoError(t, err, "v2 /main ref should exist")
+	require.NotEqual(t, plumbing.ZeroHash, v2MainRef.Hash())
+
+	// v2 /full/current ref should exist (transcript was non-empty)
+	v2FullRef, err := repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	require.NoError(t, err, "v2 /full/current ref should exist")
+	require.NotEqual(t, plumbing.ZeroHash, v2FullRef.Hash())
+
+	// Verify /main has metadata but no transcript
+	v2MainCommit, err := repo.CommitObject(v2MainRef.Hash())
+	require.NoError(t, err)
+	v2MainTree, err := v2MainCommit.Tree()
+	require.NoError(t, err)
+
+	cpPath := checkpointID.Path()
+	mainCpTree, err := v2MainTree.Tree(cpPath)
+	require.NoError(t, err)
+
+	// Root metadata.json should exist
+	_, err = mainCpTree.File(paths.MetadataFileName)
+	require.NoError(t, err, "root metadata.json should exist on /main")
+
+	// Verify /full/current has transcript
+	v2FullCommit, err := repo.CommitObject(v2FullRef.Hash())
+	require.NoError(t, err)
+	v2FullTree, err := v2FullCommit.Tree()
+	require.NoError(t, err)
+
+	fullCpTree, err := v2FullTree.Tree(cpPath)
+	require.NoError(t, err)
+	fullSessionTree, err := fullCpTree.Tree("0")
+	require.NoError(t, err)
+	_, err = fullSessionTree.File(paths.TranscriptFileName)
+	require.NoError(t, err, "full.jsonl should exist on /full/current")
+}
+
+// TestCondenseSession_V2Disabled_NoV2Refs verifies that when checkpoints_v2 is
+// not enabled, CondenseSession only writes to v1 and does not create v2 refs.
+func TestCondenseSession_V2Disabled_NoV2Refs(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+
+	worktree, err := repo.Worktree()
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644))
+	_, err = worktree.Add("main.go")
+	require.NoError(t, err)
+	commitHash, err := worktree.Commit("Initial commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+	})
+	require.NoError(t, err)
+
+	t.Chdir(dir)
+
+	// No checkpoints_v2 setting — default is disabled
+	entireDir := filepath.Join(dir, ".entire")
+	require.NoError(t, os.MkdirAll(entireDir, 0o755))
+	settingsJSON := `{"enabled": true, "strategy": "manual-commit"}`
+	require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsJSON), 0o644))
+
+	s := &ManualCommitStrategy{}
+	sessionID := "2025-01-15-test-v2-disabled"
+
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	transcript := `{"type":"human","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":"hi"}}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(metadataDirAbs, paths.TranscriptFileName), []byte(transcript), 0o644))
+
+	err = s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{"main.go"},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint 1",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.TranscriptPath = filepath.Join(metadataDirAbs, paths.TranscriptFileName)
+	state.BaseCommit = commitHash.String()[:7]
+
+	checkpointID := id.MustCheckpointID("ee22ff33aa44")
+	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// v1 should exist
+	_, err = repo.Reference(plumbing.NewBranchReferenceName(paths.MetadataBranchName), true)
+	require.NoError(t, err, "v1 metadata branch should exist")
+
+	// v2 refs should NOT exist
+	_, err = repo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
+	require.Error(t, err, "v2 /main ref should not exist when v2 is disabled")
+
+	_, err = repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true)
+	require.Error(t, err, "v2 /full/current ref should not exist when v2 is disabled")
 }

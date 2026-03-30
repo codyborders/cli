@@ -61,7 +61,16 @@ func WaitForFileExists(t *testing.T, dir string, glob string, timeout time.Durat
 // agent's prompt pattern appears before its git commit lands on disk.
 func AssertNewCommits(t *testing.T, s *RepoState, atLeast int) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	AssertNewCommitsWithTimeout(t, s, atLeast, 20*time.Second)
+}
+
+// AssertNewCommitsWithTimeout is like AssertNewCommits but with a configurable
+// timeout. Use this when WaitFor may settle on stale pane content (e.g.
+// multi-turn interactive tests where the previous turn's prompt is still
+// visible), giving the agent more time to complete its commit.
+func AssertNewCommitsWithTimeout(t *testing.T, s *RepoState, atLeast int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for {
 		out := GitOutput(t, s.Dir, "log", "--oneline", s.HeadBefore+"..HEAD")
 		var lines []string
@@ -72,7 +81,7 @@ func AssertNewCommits(t *testing.T, s *RepoState, atLeast int) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("expected at least %d new commit(s), got %d after 20s", atLeast, len(lines))
+			t.Fatalf("expected at least %d new commit(s), got %d after %s", atLeast, len(lines), timeout)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -109,14 +118,23 @@ func shadowBranches(t *testing.T, dir string) []string {
 	return shadow
 }
 
-// AssertNoShadowBranches asserts that no shadow branches (entire/*) remain,
-// excluding entire/checkpoints/*. Shadow branches should be cleaned up after
-// commits condense session data to the metadata branch.
-func AssertNoShadowBranches(t *testing.T, dir string) {
+// WaitForNoShadowBranches polls until all shadow branches are cleaned up or
+// the timeout expires. Shadow branch cleanup can lag slightly behind checkpoint
+// condensation (carry-forward creates intermediate branches that are deleted
+// asynchronously).
+func WaitForNoShadowBranches(t *testing.T, dir string, timeout time.Duration) {
 	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		shadow := shadowBranches(t, dir)
+		if len(shadow) == 0 {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	shadow := shadowBranches(t, dir)
-	assert.Empty(t, shadow,
-		"shadow branches should be cleaned up after commit, found: %v", shadow)
+	require.Emptyf(t, shadow,
+		"shadow branches should be cleaned up within %s after commit, found: %v", timeout, shadow)
 }
 
 // AssertHasShadowBranches asserts that at least one shadow branch (entire/*)
@@ -191,6 +209,26 @@ func AssertCheckpointExists(t *testing.T, dir string, checkpointID string) {
 	raw := gitOutputSafe(dir, "show", blob)
 	assert.NotEmpty(t, raw,
 		"checkpoint %s metadata not found at %s", checkpointID, path)
+}
+
+// WaitForCheckpointExists polls until the checkpoint ID appears on the
+// checkpoint branch and its metadata.json is readable, or fails after timeout.
+func WaitForCheckpointExists(t *testing.T, dir string, checkpointID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out := gitOutputSafe(dir, "log", "entire/checkpoints/v1", "--grep="+checkpointID, "--oneline")
+		if out != "" {
+			path := CheckpointPath(checkpointID) + "/metadata.json"
+			blob := "entire/checkpoints/v1:" + path
+			raw := gitOutputSafe(dir, "show", blob)
+			if raw != "" {
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("checkpoint %s not found on checkpoint branch within %s", checkpointID, timeout)
 }
 
 // AssertCommitLinkedToCheckpoint asserts the trailer exists AND the

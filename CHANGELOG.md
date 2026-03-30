@@ -5,6 +5,92 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-03-30
+
+### Added
+
+- Codex CLI agent integration with lifecycle hooks, e2e runner, transcript parsing, and token tracking. note: subagent tracking is not yet supported due to missing `pre-task`/`post-task` hooks in codex ([#772](https://github.com/entireio/cli/pull/772), [#794](https://github.com/entireio/cli/pull/794))
+- Windows support: cross-platform path handling, CRLF-safe git parsing, detached process spawning, and `WINDOWS.md` guide ([#766](https://github.com/entireio/cli/pull/766))
+- Checkpoints v2 (work in progress): dual-write behind `checkpoints_v2` feature flag with `/main` and `/full/current` ref layout, generation rotation to bound transcript growth, and unified `transcript.jsonl` condensation for Claude Code and OpenCode ([#742](https://github.com/entireio/cli/pull/742), [#759](https://github.com/entireio/cli/pull/759), [#781](https://github.com/entireio/cli/pull/781), [#788](https://github.com/entireio/cli/pull/788))
+- `entire configure --checkpoint-remote` for setting the checkpoint remote interactively ([#798](https://github.com/entireio/cli/pull/798))
+- `entire logout` command to remove stored credentials ([#740](https://github.com/entireio/cli/pull/740))
+- E2E triage CI workflow with Slack integration for automated failure analysis ([#741](https://github.com/entireio/cli/pull/741))
+- Diagnostic logging for checkpoint linking failures and session content filtering ([#785](https://github.com/entireio/cli/pull/785))
+
+### Changed
+
+- Redirect questions and support links from GitHub Discussions to Discord ([#761](https://github.com/entireio/cli/pull/761))
+
+### Fixed
+
+- Cursor mid-turn condensation and Gemini interactive prompt hang ([#780](https://github.com/entireio/cli/pull/780))
+- Copilot CLI E2E fixes: Edit mode handling, subagent reliability, slash command dismissal ([#782](https://github.com/entireio/cli/pull/782), [#797](https://github.com/entireio/cli/pull/797))
+- Attribution handling for long sessions ([#792](https://github.com/entireio/cli/pull/792))
+- Cross-platform `files_touched` path normalization with `filepath.ToSlash` ([#803](https://github.com/entireio/cli/pull/803))
+- OpenCode system-reminder messages appearing in transcript parser ([#671](https://github.com/entireio/cli/pull/671))
+- External agent plugin discovery during git hook execution, ensuring token usage data in metadata ([#716](https://github.com/entireio/cli/pull/716))
+- Local-dev hooks path resolution for non-Claude agents ([#745](https://github.com/entireio/cli/pull/745))
+- Gemini subagent commits missing `Entire-Checkpoint` trailer in `prepare-commit-msg` ([#780](https://github.com/entireio/cli/pull/780))
+- E2E timing flakiness with hardened assertions and carry-forward checkpoint condensation ([#787](https://github.com/entireio/cli/pull/787))
+
+### Housekeeping
+
+- Windows-compatible external agent name derivation and binary discovery ([#729](https://github.com/entireio/cli/pull/729))
+- Linux PATH instruction for `go install` in README ([#764](https://github.com/entireio/cli/pull/764))
+- Bumped go-git to fix `index decoder: invalid checksum` on some repos using the `TREE` extension ([#801](https://github.com/entireio/cli/pull/801))
+- Dependency bumps: posthog-go 1.11.2, go-keyring 0.2.8, slackapi/slack-github-action 3.0.1 ([#786](https://github.com/entireio/cli/pull/786), [#755](https://github.com/entireio/cli/pull/755), [#695](https://github.com/entireio/cli/pull/695))
+
+### Thanks
+
+Thanks to @keyu98 for Windows-compatible agent name derivation and fixing external agent plugin discovery in git hooks! Thanks to @sheikhlimon for the Linux install docs, @erezrokah for the CLAUDE.md fix, and @mvanhorn for fixing OpenCode transcript parsing!
+
+## [0.5.1] - 2026-03-19
+
+### Added
+
+- Sparse metadata fetch with on-demand blob resolution for reduced memory and network cost ([#680](https://github.com/entireio/cli/pull/680), [#721](https://github.com/entireio/cli/pull/721))
+- `entire trace` command for diagnosing slow performance hooks and lifecycle events ([#652](https://github.com/entireio/cli/pull/652))
+- Opt-in PII redaction with typed tokens ([#397](https://github.com/entireio/cli/pull/397))
+- Auto-discover external agents during `entire enable`, `entire rewind`, and `entire resume` ([#678](https://github.com/entireio/cli/pull/678))
+- Preview support for dedicated remote repository for checkpoint data, onboarded the CLI repository ([#677](https://github.com/entireio/cli/pull/677), [#732](https://github.com/entireio/cli/pull/732))
+- E2E tests for external agents with roger-roger canary ([#700](https://github.com/entireio/cli/pull/700), [#702](https://github.com/entireio/cli/pull/702))
+- hk hook manager detection ([#657](https://github.com/entireio/cli/pull/657))
+
+### Changed
+
+- Bumped go-git with improved large packfile memory efficiency ([#731](https://github.com/entireio/cli/pull/731))
+- Use transcript size instead of line count for new content detection ([#726](https://github.com/entireio/cli/pull/726))
+- Improved traversal resistance with `os.OpenRoot` ([#704](https://github.com/entireio/cli/pull/704))
+- Upgraded to Go 1.26.1 and golangci-lint 2.11.3 ([#699](https://github.com/entireio/cli/pull/699))
+- CLI command output consistency improvements ([#709](https://github.com/entireio/cli/pull/709))
+
+### Fixed
+
+- Gemini CLI 0.33+ hook validation by stripping non-array values from hooks config ([#714](https://github.com/entireio/cli/pull/714))
+- Copilot checkpoint token scoping, session token backfill, and modelMetrics struct ([#717](https://github.com/entireio/cli/pull/717))
+- Cursor 2026.03.11 transitioning from flat to nested path during a session ([#707](https://github.com/entireio/cli/pull/707))
+- Rewind file path resolution when running from a subdirectory ([#663](https://github.com/entireio/cli/pull/663))
+- `GetWorktreeID` handling `.bare/worktrees/` layout in bare repos ([#669](https://github.com/entireio/cli/pull/669))
+- OpenCode over-redaction in session transcripts ([#703](https://github.com/entireio/cli/pull/703))
+- Factory AI Droid prompt fallback to script parsing when hooks don't provide it ([#705](https://github.com/entireio/cli/pull/705))
+- Resume fetching metadata branch on fresh clones where `entire/checkpoints/v1` doesn't exist locally ([#680](https://github.com/entireio/cli/pull/680))
+- Remote branch detection for v6 metadata merging ([#662](https://github.com/entireio/cli/pull/662))
+- Mise install detection for update command ([#659](https://github.com/entireio/cli/pull/659))
+- Cursor-cli E2E flakiness with isolated config dir ([#654](https://github.com/entireio/cli/pull/654))
+
+### Housekeeping
+
+- Factory AI Droid added to all documentation ([#655](https://github.com/entireio/cli/pull/655))
+- Copilot CLI added to all documentation ([#653](https://github.com/entireio/cli/pull/653))
+- Updated Discord release message to include installation link ([#646](https://github.com/entireio/cli/pull/646))
+- Dependency bumps: actions/create-github-app-token 3.0.0, jdx/mise-action 4, gitleaks 8.30.1 ([#706](https://github.com/entireio/cli/pull/706), [#694](https://github.com/entireio/cli/pull/694), [#689](https://github.com/entireio/cli/pull/689))
+- Added tests for git remote related flows ([#696](https://github.com/entireio/cli/pull/696))
+- "Why Entire" section in README ([#331](https://github.com/entireio/cli/pull/331))
+
+### Thanks
+
+Thanks to @mvanhorn for multiple contributions including hk hook manager detection, bare repo worktree ID fix, rewind subdirectory path fix, and mise install detection!
+
 ## [0.5.0] - 2026-03-06
 
 ### Added
