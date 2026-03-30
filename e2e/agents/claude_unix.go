@@ -1,9 +1,8 @@
-//go:build !windows
+//go:build unix
 
 package agents
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 )
@@ -34,10 +33,4 @@ func cleanConfigDir() (string, error) {
 	}
 
 	return dst, nil
-}
-
-func (c *Claude) StartSession(_ context.Context, dir string) (Session, error) {
-	return c.startSessionCommon(dir, func(_ *PTYSession, _ string) {
-		// No extra dialogs to handle on Unix.
-	})
 }

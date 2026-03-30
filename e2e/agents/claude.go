@@ -137,9 +137,7 @@ func (c *Claude) RunPrompt(ctx context.Context, dir string, prompt string, opts 
 	}, err
 }
 
-// startSessionCommon contains the shared session startup logic.
-// dismissDialog is called for each dialog screen to handle OS-specific dialogs.
-func (c *Claude) startSessionCommon(dir string, dismissDialog func(s *PTYSession, content string)) (Session, error) {
+func (c *Claude) StartSession(ctx context.Context, dir string) (Session, error) {
 	name := fmt.Sprintf("claude-test-%d", time.Now().UnixNano())
 
 	configDir, err := cleanConfigDir()
@@ -147,7 +145,7 @@ func (c *Claude) startSessionCommon(dir string, dismissDialog func(s *PTYSession
 		return nil, fmt.Errorf("create clean config dir: %w", err)
 	}
 
-	extraEnv := []string{
+	envArgs := []string{
 		"ACCESSIBLE=1",
 
 		// See https://code.claude.com/docs/en/settings - without this setting Claude was going off and
@@ -159,7 +157,9 @@ func (c *Claude) startSessionCommon(dir string, dismissDialog func(s *PTYSession
 		"CLAUDE_CONFIG_DIR=" + configDir,
 	}
 
-	s, err := NewPTYSession(name, dir, []string{"CLAUDECODE", "ENTIRE_TEST_TTY"}, extraEnv, c.Binary(), "--dangerously-skip-permissions")
+	args := append([]string{"env"}, envArgs...)
+	args = append(args, c.Binary(), "--dangerously-skip-permissions")
+	s, err := NewTmuxSession(name, dir, []string{"CLAUDECODE", "ENTIRE_TEST_TTY"}, args[0], args[1:]...)
 	if err != nil {
 		_ = os.RemoveAll(configDir)
 		return nil, err
@@ -182,7 +182,6 @@ func (c *Claude) startSessionCommon(dir string, dismissDialog func(s *PTYSession
 			_ = s.SendKeys("Down")
 			time.Sleep(200 * time.Millisecond)
 		}
-		dismissDialog(s, content)
 		_ = s.SendKeys("Enter")
 		time.Sleep(500 * time.Millisecond)
 	}

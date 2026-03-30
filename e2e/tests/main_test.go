@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 
 	// Preflight: verify required dependencies before running any tests.
 	var missing []string
-	for _, bin := range []string{"git"} {
+	for _, bin := range []string{"git", "tmux"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			missing = append(missing, bin)
 		}
@@ -63,11 +63,7 @@ func TestMain(m *testing.M) {
 
 	// Don't look at user's Git config, ignore everything except the project-local Git settings.
 	// This avoids oddball configs in ~/.gitconfig messing with our E2E tests.
-	// We use an empty temp file instead of os.DevNull because git on Windows
-	// cannot open NUL as a config file ("unable to access 'NUL': Invalid argument").
-	emptyConfig := filepath.Join(runDir, "empty-gitconfig")
-	_ = os.WriteFile(emptyConfig, nil, 0o644)
-	os.Setenv("GIT_CONFIG_GLOBAL", emptyConfig)
+	os.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 
 	os.Exit(m.Run())
 }

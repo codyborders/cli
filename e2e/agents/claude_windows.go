@@ -3,7 +3,6 @@
 package agents
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 )
@@ -38,11 +37,4 @@ func cleanConfigDir() (string, error) {
 	}
 
 	return dst, nil
-}
-
-// StartSession returns nil on Windows because ConPTY cannot reliably deliver
-// key escape sequences to huh/bubbletea TUI forms. Tests that require
-// interactive sessions are skipped on Windows.
-func (c *Claude) StartSession(_ context.Context, _ string) (Session, error) {
-	return nil, nil
 }
