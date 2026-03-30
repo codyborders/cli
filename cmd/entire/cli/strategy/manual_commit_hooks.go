@@ -2111,7 +2111,10 @@ func getStagedFiles(ctx context.Context) ([]string, error) {
 	}
 
 	staged := []string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	trimmed := strings.TrimSpace(string(output))
+	// Normalize Windows line endings (\r\n) to Unix (\n) for cross-platform git output
+	trimmed = strings.ReplaceAll(trimmed, "\r\n", "\n")
+	for _, line := range strings.Split(trimmed, "\n") {
 		if line != "" {
 			staged = append(staged, filepath.ToSlash(line))
 		}

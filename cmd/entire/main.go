@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/entireio/cli/cmd/entire/cli"
 	"github.com/spf13/cobra"
@@ -19,7 +18,7 @@ func main() {
 
 	// Handle interrupt signals
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigChan, terminationSignals()...)
 	go func() {
 		<-sigChan
 		cancel()
