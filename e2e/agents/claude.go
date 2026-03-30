@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -138,6 +139,9 @@ func (c *Claude) RunPrompt(ctx context.Context, dir string, prompt string, opts 
 }
 
 func (c *Claude) StartSession(ctx context.Context, dir string) (Session, error) {
+	if runtime.GOOS == "windows" {
+		return nil, nil //nolint:nilnil // nil session signals "not supported" per Agent interface contract
+	}
 	name := fmt.Sprintf("claude-test-%d", time.Now().UnixNano())
 
 	configDir, err := cleanConfigDir()
