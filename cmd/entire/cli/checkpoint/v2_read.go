@@ -192,6 +192,8 @@ func (s *V2GitStore) readTranscriptFromFullRefs(ctx context.Context, checkpointI
 }
 
 // fetchRemoteFullRefs discovers and fetches /full/* refs from origin that aren't local.
+// Uses "origin" directly — checkpoint_remote is not accessible from the checkpoint
+// package without an import cycle, and the push path handles checkpoint_remote separately.
 func (s *V2GitStore) fetchRemoteFullRefs(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
