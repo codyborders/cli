@@ -197,7 +197,7 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 			)
 			fmt.Fprintf(w, "Found %d checkpoints for commit %s but metadata is not available\n",
 				len(result.checkpointIDs), result.commitHash[:7])
-			return checkRemoteMetadata(ctx, result.checkpointIDs[0])
+			return checkRemoteMetadata(ctx, w, errW, result.checkpointIDs[0])
 		}
 		skipped := len(result.checkpointIDs) - 1
 		fmt.Fprintf(w, "Found %d checkpoints for commit %s, resuming from the latest (%d older checkpoints skipped)\n",
@@ -217,7 +217,7 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 				slog.String("error", treeErr.Error()),
 			)
 			// All fetch attempts failed, check if remote has it
-			return checkRemoteMetadata(ctx, checkpointID)
+			return checkRemoteMetadata(ctx, w, errW, checkpointID)
 		}
 	}
 
@@ -238,7 +238,7 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 			slog.String("tree_hash", metadataTree.Hash.String()),
 			slog.String("error", cpErr.Error()),
 		)
-		return checkRemoteMetadata(ctx, checkpointID)
+		return checkRemoteMetadata(ctx, w, errW, checkpointID)
 	}
 
 	// Log subtree details for diagnostics
@@ -280,7 +280,7 @@ func resumeFromCurrentBranch(ctx context.Context, w, errW io.Writer, branchName 
 			slog.String("subtree_hash", cpSubtree.Hash.String()),
 			slog.String("error", err.Error()),
 		)
-		return checkRemoteMetadata(ctx, checkpointID)
+		return checkRemoteMetadata(ctx, w, errW, checkpointID)
 	}
 
 	logging.Debug(logCtx, "checkpoint metadata read successfully",
@@ -619,7 +619,7 @@ func promptResumeFromOlderCheckpoint() (bool, error) {
 // checkRemoteMetadata checks if checkpoint metadata exists on the remote and
 // automatically fetches it if available. When a checkpoint_remote is configured,
 // fetches from there (that's where checkpoints live). Otherwise falls back to origin.
-func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) error {
+func checkRemoteMetadata(ctx context.Context, w, errW io.Writer, checkpointID id.CheckpointID) error {
 	logCtx := logging.WithComponent(ctx, "resume.checkRemoteMetadata")
 
 	// Open a fresh repo to avoid stale packfile index issues
@@ -628,7 +628,7 @@ func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) erro
 		logging.Warn(logCtx, "failed to open repository for remote check",
 			slog.String("error", repoErr.Error()),
 		)
-		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but session metadata not available\n", checkpointID)
+		fmt.Fprintf(errW, "Checkpoint '%s' found in commit but session metadata not available\n", checkpointID)
 		return nil
 	}
 
@@ -647,7 +647,7 @@ func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) erro
 			if freshErr == nil {
 				if metadataTree, treeErr := strategy.GetMetadataBranchTree(freshRepo); treeErr == nil {
 					if metadata, err := tryReadCheckpointFromTree(ctx, metadataTree, freshRepo, checkpointID); err == nil {
-						return resumeSession(ctx, os.Stdout, os.Stderr, metadata, false)
+						return resumeSession(ctx, w, errW, metadata, false)
 					}
 				}
 			}
@@ -661,22 +661,22 @@ func checkRemoteMetadata(ctx context.Context, checkpointID id.CheckpointID) erro
 	// Fall back to origin's remote-tracking branch
 	if remoteTree, treeErr := strategy.GetRemoteMetadataBranchTree(repo); treeErr == nil {
 		if metadata, err := tryReadCheckpointFromTree(ctx, remoteTree, repo, checkpointID); err == nil {
-			return resumeSession(ctx, os.Stdout, os.Stderr, metadata, false)
+			return resumeSession(ctx, w, errW, metadata, false)
 		}
 	}
 
 	// Nothing worked — print helpful error message
 	if hasCheckpointRemote {
 		if resolveErr != nil {
-			fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but the checkpoint remote URL could not be resolved: %s\n", checkpointID, resolveErr)
+			fmt.Fprintf(errW, "Checkpoint '%s' found in commit but the checkpoint remote URL could not be resolved: %s\n", checkpointID, resolveErr)
 		} else {
-			fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but its metadata could not be fetched from the checkpoint remote.\n", checkpointID)
+			fmt.Fprintf(errW, "Checkpoint '%s' found in commit but its metadata could not be fetched from the checkpoint remote.\n", checkpointID)
 		}
-		fmt.Fprintf(os.Stderr, "Ensure you have access to the checkpoint remote configured in .entire/settings.json.\n")
+		fmt.Fprintf(errW, "Ensure you have access to the checkpoint remote configured in .entire/settings.json.\n")
 	} else {
-		fmt.Fprintf(os.Stderr, "Checkpoint '%s' found in commit but the entire/checkpoints/v1 branch is not available locally or on the remote.\n", checkpointID)
-		fmt.Fprintf(os.Stderr, "This can happen if the metadata branch was not pushed. Try:\n")
-		fmt.Fprintf(os.Stderr, "  git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
+		fmt.Fprintf(errW, "Checkpoint '%s' found in commit but the entire/checkpoints/v1 branch is not available locally or on the remote.\n", checkpointID)
+		fmt.Fprintf(errW, "This can happen if the metadata branch was not pushed. Try:\n")
+		fmt.Fprintf(errW, "  git fetch origin entire/checkpoints/v1:entire/checkpoints/v1\n")
 	}
 	return nil
 }
