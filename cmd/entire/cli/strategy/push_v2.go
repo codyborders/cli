@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
+	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 
@@ -373,7 +374,7 @@ func updateGenerationTimestamps(repo *git.Repository, genBlobHash plumbing.Hash,
 		gen.NewestCheckpointAt = newestFromLocal
 	}
 
-	updatedData, err := json.Marshal(gen)
+	updatedData, err := jsonutil.MarshalIndentWithNewline(gen, "", "  ")
 	if err != nil {
 		return object.TreeEntry{}, fmt.Errorf("failed to marshal generation.json: %w", err)
 	}
