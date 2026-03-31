@@ -60,7 +60,7 @@ Use --dry-run to preview what would be deleted without prompting.`,
 			}
 
 			if allFlag {
-				return runCleanAll(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), forceFlag, dryRunFlag)
+				return runCleanAll(ctx, cmd, forceFlag, dryRunFlag)
 			}
 
 			// Check if in git repository
@@ -257,7 +257,7 @@ func runCleanSession(ctx context.Context, cmd *cobra.Command, strat *strategy.Ma
 }
 
 // runCleanAll cleans all orphaned data across the repository (old `entire clean` behavior).
-func runCleanAll(ctx context.Context, w, errW io.Writer, force, dryRun bool) error {
+func runCleanAll(ctx context.Context, cmd *cobra.Command, force, dryRun bool) error {
 	// List all cleanup items
 	items, err := strategy.ListAllCleanupItems(ctx)
 	if err != nil {
@@ -268,15 +268,17 @@ func runCleanAll(ctx context.Context, w, errW io.Writer, force, dryRun bool) err
 	tempFiles, err := listTempFiles(ctx)
 	if err != nil {
 		// Non-fatal: continue with other cleanup items
-		fmt.Fprintf(errW, "Warning: failed to list temp files: %v\n", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to list temp files: %v\n", err)
 	}
 
-	return runCleanAllWithItems(ctx, w, errW, force, dryRun, items, tempFiles)
+	return runCleanAllWithItems(ctx, cmd, force, dryRun, items, tempFiles)
 }
 
 // runCleanAllWithItems is the core logic for cleaning all orphaned items.
-// Separated for testability.
-func runCleanAllWithItems(ctx context.Context, w, errW io.Writer, force, dryRun bool, items []strategy.CleanupItem, tempFiles []string) error {
+// Separated for testability — tests pass a cmd without a TTY and use force or dryRun to avoid prompts.
+func runCleanAllWithItems(ctx context.Context, cmd *cobra.Command, force, dryRun bool, items []strategy.CleanupItem, tempFiles []string) error {
+	w := cmd.OutOrStdout()
+	errW := cmd.ErrOrStderr()
 	// Handle no items case
 	if len(items) == 0 && len(tempFiles) == 0 {
 		fmt.Fprintln(w, "No orphaned items to clean up.")
@@ -296,8 +298,8 @@ func runCleanAllWithItems(ctx context.Context, w, errW io.Writer, force, dryRun 
 		}
 	}
 
-	// Dry-run or non-force: show preview
-	if dryRun || !force {
+	// Show preview when not in force mode
+	if !force || dryRun {
 		totalItems := len(items) + len(tempFiles)
 		fmt.Fprintf(w, "Found %d %s to clean:\n\n", totalItems, itemWord(totalItems))
 
@@ -338,8 +340,24 @@ func runCleanAllWithItems(ctx context.Context, w, errW io.Writer, force, dryRun 
 			return nil
 		}
 
-		fmt.Fprintln(w, "Run with --force to delete these items.")
-		return nil
+		// Prompt for confirmation
+		var confirmed bool
+		form := NewAccessibleForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title(fmt.Sprintf("Delete %d %s?", totalItems, itemWord(totalItems))).
+					Value(&confirmed),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("failed to get confirmation: %w", err)
+		}
+		if !confirmed {
+			return nil
+		}
 	}
 
 	// Force mode - delete items

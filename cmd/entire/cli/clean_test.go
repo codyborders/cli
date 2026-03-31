@@ -16,7 +16,19 @@ import (
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/spf13/cobra"
 )
+
+// newTestCleanCmd creates a cobra.Command with captured stdout/stderr for testing.
+func newTestCleanCmd(t *testing.T) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	return cmd, &stdout, &stderr
+}
 
 func setupCleanTestRepo(t *testing.T) (*git.Repository, plumbing.Hash) {
 	t.Helper()
@@ -374,11 +386,11 @@ func TestCleanCmd_All_PreviewMode(t *testing.T) {
 	cmd := newCleanCmd()
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"--all"}) // no --force, shows preview
+	cmd.SetArgs([]string{"--all", "--dry-run"})
 
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("clean --all error = %v", err)
+		t.Fatalf("clean --all --dry-run error = %v", err)
 	}
 
 	output := stdout.String()
@@ -395,15 +407,15 @@ func TestCleanCmd_All_PreviewMode(t *testing.T) {
 	if strings.Contains(output, paths.MetadataBranchName) {
 		t.Errorf("Should not list '%s', got: %s", paths.MetadataBranchName, output)
 	}
-	if !strings.Contains(output, "--force") {
-		t.Errorf("Expected '--force' prompt in output, got: %s", output)
+	if !strings.Contains(output, "without --dry-run") {
+		t.Errorf("Expected '--dry-run' hint in output, got: %s", output)
 	}
 
-	// Branches should still exist (preview mode doesn't delete)
+	// Branches should still exist (dry-run doesn't delete)
 	for _, b := range shadowBranches {
 		refName := plumbing.NewBranchReferenceName(b)
 		if _, err := repo.Reference(refName, true); err != nil {
-			t.Errorf("Branch %s should still exist after preview", b)
+			t.Errorf("Branch %s should still exist after dry-run", b)
 		}
 	}
 }
@@ -558,11 +570,11 @@ func TestCleanCmd_All_Subdirectory(t *testing.T) {
 	cmd := newCleanCmd()
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"--all"})
+	cmd.SetArgs([]string{"--all", "--dry-run"})
 
 	err = cmd.Execute()
 	if err != nil {
-		t.Fatalf("clean --all from subdirectory error = %v", err)
+		t.Fatalf("clean --all --dry-run from subdirectory error = %v", err)
 	}
 
 	output := stdout.String()
@@ -586,9 +598,8 @@ func TestRunCleanAllWithItems_PartialFailure(t *testing.T) {
 		{Type: strategy.CleanupTypeShadowBranch, ID: "entire/nonexistent1234567", Reason: "test"},
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := runCleanAllWithItems(context.Background(), &stdout, &stderr, true, false, items, nil)
+	cmd, stdout, stderr := newTestCleanCmd(t)
+	err := runCleanAllWithItems(cmd.Context(), cmd, true, false, items, nil)
 
 	if err == nil {
 		t.Fatal("runCleanAllWithItems() should return error when items fail to delete")
@@ -621,9 +632,8 @@ func TestRunCleanAllWithItems_AllFailures(t *testing.T) {
 		{Type: strategy.CleanupTypeShadowBranch, ID: "entire/alsononexistent", Reason: "test"},
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := runCleanAllWithItems(context.Background(), &stdout, &stderr, true, false, items, nil)
+	cmd, stdout, stderr := newTestCleanCmd(t)
+	err := runCleanAllWithItems(cmd.Context(), cmd, true, false, items, nil)
 
 	if err == nil {
 		t.Fatal("runCleanAllWithItems() should return error when items fail to delete")
@@ -646,9 +656,8 @@ func TestRunCleanAllWithItems_AllFailures(t *testing.T) {
 func TestRunCleanAllWithItems_NoItems(t *testing.T) {
 	setupCleanTestRepo(t)
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := runCleanAllWithItems(context.Background(), &stdout, &stderr, false, false, []strategy.CleanupItem{}, nil)
+	cmd, stdout, _ := newTestCleanCmd(t)
+	err := runCleanAllWithItems(cmd.Context(), cmd, false, false, []strategy.CleanupItem{}, nil)
 	if err != nil {
 		t.Fatalf("runCleanAllWithItems() error = %v", err)
 	}
@@ -668,9 +677,8 @@ func TestRunCleanAllWithItems_MixedTypes_Preview(t *testing.T) {
 		{Type: strategy.CleanupTypeCheckpoint, ID: "checkpoint-abc", Reason: "orphaned"},
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := runCleanAllWithItems(context.Background(), &stdout, &stderr, false, false, items, nil)
+	cmd, stdout, _ := newTestCleanCmd(t)
+	err := runCleanAllWithItems(cmd.Context(), cmd, false, true, items, nil)
 	if err != nil {
 		t.Fatalf("runCleanAllWithItems() error = %v", err)
 	}
