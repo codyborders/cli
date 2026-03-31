@@ -48,7 +48,6 @@ Thanks to @keyu98 for Windows-compatible agent name derivation and fixing extern
 
 ### Added
 
-- `entire stop` command to manually mark one or more active sessions as ended, preventing future checkpoint leakage
 - Sparse metadata fetch with on-demand blob resolution for reduced memory and network cost ([#680](https://github.com/entireio/cli/pull/680), [#721](https://github.com/entireio/cli/pull/721))
 - `entire trace` command for diagnosing slow performance hooks and lifecycle events ([#652](https://github.com/entireio/cli/pull/652))
 - Opt-in PII redaction with typed tokens ([#397](https://github.com/entireio/cli/pull/397))
