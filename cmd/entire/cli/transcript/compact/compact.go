@@ -45,6 +45,8 @@ func newTranscriptLine(opts MetadataFields) transcriptLine {
 	}
 }
 
+const toolResultStatusError = "error"
+
 // toolResultJSON is the compact result object inlined into tool_use blocks.
 type toolResultJSON struct {
 	Output     string              `json:"output"`
@@ -395,7 +397,7 @@ func buildToolResult(tr toolResultEntry) json.RawMessage {
 		MatchCount: tr.matchCount,
 	}
 	if tr.isError {
-		r.Status = "error"
+		r.Status = toolResultStatusError
 	}
 	if tr.file != nil {
 		r.File = &toolResultFileJSON{

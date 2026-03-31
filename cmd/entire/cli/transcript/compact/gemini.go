@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/entireio/cli/cmd/entire/cli/textutil"
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
 )
 
@@ -20,7 +21,7 @@ import (
 //   - Tool calls are at the message level in a "toolCalls" array
 //   - A message can have both content text and toolCalls
 //   - Timestamps are ISO strings (not millisecond integers)
-//   - "thoughts" and "tokens" are metadata fields; tokens.input/output are preserved
+//   - Token usage is in "tokens" with "input" and "output" fields
 
 // geminiDroppedTypes are Gemini message types that carry no transcript-relevant data.
 var geminiDroppedTypes = map[string]bool{
@@ -53,9 +54,7 @@ type geminiMessage struct {
 	Type      string           `json:"type"`
 	Content   string           `json:"content"`
 	ToolCalls []geminiToolCall `json:"toolCalls"`
-	Thoughts  json.RawMessage  `json:"thoughts"` // parsed only to detect; always dropped
 	Tokens    *geminiTokens    `json:"tokens"`
-	Model     string           `json:"model"` // dropped
 }
 
 // geminiTokens holds token usage from a Gemini message.
@@ -66,11 +65,11 @@ type geminiTokens struct {
 
 // geminiToolCall represents a single tool invocation within a Gemini message.
 type geminiToolCall struct {
-	ID     string                 `json:"id"`
-	Name   string                 `json:"name"`
-	Args   map[string]interface{} `json:"args"`
-	Result []geminiToolResult     `json:"result"`
-	Status string                 `json:"status"`
+	ID     string             `json:"id"`
+	Name   string             `json:"name"`
+	Args   json.RawMessage    `json:"args"`
+	Result []geminiToolResult `json:"result"`
+	Status string             `json:"status"`
 }
 
 // geminiToolResult represents a tool result entry from the Gemini format.
@@ -101,7 +100,10 @@ func compactGemini(content []byte, opts MetadataFields) ([]byte, error) {
 			continue
 		}
 
-		ts, _ := json.Marshal(msg.Timestamp) //nolint:errcheck,errchkjson // string timestamp never fails
+		ts, err := json.Marshal(msg.Timestamp)
+		if err != nil {
+			continue
+		}
 
 		switch msg.Type {
 		case transcript.TypeUser:
@@ -117,11 +119,12 @@ func compactGemini(content []byte, opts MetadataFields) ([]byte, error) {
 // emitGeminiUser produces a single user line. Gemini user messages have
 // plain string content.
 func emitGeminiUser(result *[]byte, base transcriptLine, msg geminiMessage, ts json.RawMessage) {
-	if msg.Content == "" {
+	text := textutil.StripIDEContextTags(msg.Content)
+	if text == "" {
 		return
 	}
 
-	b, err := json.Marshal([]userTextBlock{{Text: msg.Content}})
+	b, err := json.Marshal([]userTextBlock{{Text: text}})
 	if err != nil {
 		return
 	}
@@ -136,40 +139,50 @@ func emitGeminiUser(result *[]byte, base transcriptLine, msg geminiMessage, ts j
 // emitGeminiAssistant produces a single assistant line. The content array
 // contains text blocks (from content field) and tool_use blocks (from toolCalls).
 func emitGeminiAssistant(result *[]byte, base transcriptLine, msg geminiMessage, ts json.RawMessage) {
-	contentBlocks := make([]map[string]json.RawMessage, 0, 1+len(msg.ToolCalls))
+	content := make([]map[string]json.RawMessage, 0, 1+len(msg.ToolCalls))
 
-	// Add text block if content is non-empty.
 	if msg.Content != "" {
-		tb, _ := json.Marshal(transcript.ContentTypeText) //nolint:errcheck,errchkjson // string never fails
-		text, _ := json.Marshal(msg.Content)              //nolint:errcheck,errchkjson // string never fails
-		contentBlocks = append(contentBlocks, map[string]json.RawMessage{
-			"type": tb,
-			"text": text,
-		})
+		b, err := json.Marshal(transcript.ContentTypeText)
+		if err == nil {
+			text, err := json.Marshal(msg.Content)
+			if err == nil {
+				content = append(content, map[string]json.RawMessage{
+					"type": b,
+					"text": text,
+				})
+			}
+		}
 	}
 
-	// Add tool_use blocks from toolCalls.
 	for _, tc := range msg.ToolCalls {
-		tb, _ := json.Marshal(transcript.ContentTypeToolUse) //nolint:errcheck,errchkjson // string never fails
-		id, _ := json.Marshal(tc.ID)                         //nolint:errcheck,errchkjson // string never fails
-		name, _ := json.Marshal(tc.Name)                     //nolint:errcheck,errchkjson // string never fails
-		input, _ := json.Marshal(tc.Args)                    //nolint:errcheck,errchkjson // map marshal is best-effort
+		b, err := json.Marshal(transcript.ContentTypeToolUse)
+		if err != nil {
+			continue
+		}
+		id, err := json.Marshal(tc.ID)
+		if err != nil {
+			continue
+		}
+		name, err := json.Marshal(tc.Name)
+		if err != nil {
+			continue
+		}
 
 		toolBlock := map[string]json.RawMessage{
-			"type":   tb,
+			"type":   b,
 			"id":     id,
 			"name":   name,
-			"input":  input,
+			"input":  tc.Args,
 			"result": geminiToolResultCompact(tc),
 		}
-		contentBlocks = append(contentBlocks, toolBlock)
+		content = append(content, toolBlock)
 	}
 
-	if len(contentBlocks) == 0 {
+	if len(content) == 0 {
 		return
 	}
 
-	contentJSON, err := json.Marshal(contentBlocks)
+	contentJSON, err := json.Marshal(content)
 	if err != nil {
 		return
 	}
@@ -196,7 +209,10 @@ func geminiToolResultCompact(tc geminiToolCall) json.RawMessage {
 
 	r := toolResultJSON{
 		Output: output,
-		Status: tc.Status,
+		Status: "success",
+	}
+	if tc.Status != "" && tc.Status != "success" {
+		r.Status = toolResultStatusError
 	}
 	b, err := json.Marshal(r)
 	if err != nil {

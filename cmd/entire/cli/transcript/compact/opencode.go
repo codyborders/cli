@@ -187,7 +187,7 @@ func openCodeToolResult(state map[string]json.RawMessage) json.RawMessage {
 		Status: "success",
 	}
 	if s := unquote(state["status"]); s != "" && s != "completed" {
-		r.Status = "error"
+		r.Status = toolResultStatusError
 	}
 	b, err := json.Marshal(r)
 	if err != nil {
