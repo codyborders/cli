@@ -191,8 +191,8 @@ func (s *V2GitStore) computeGenerationTimestamps() GenerationMetadata {
 // generationRefWidth is the zero-padded width of archived generation ref names.
 const generationRefWidth = 13
 
-// generationRefPattern matches exactly 13 digits (the archived generation ref suffix format).
-var generationRefPattern = regexp.MustCompile(`^\d{13}$`)
+// GenerationRefPattern matches exactly 13 digits (the archived generation ref suffix format).
+var GenerationRefPattern = regexp.MustCompile(`^\d{13}$`)
 
 // listArchivedGenerations returns the names of all archived generation refs
 // (everything under V2FullRefPrefix matching the expected numeric format), sorted ascending.
@@ -209,7 +209,7 @@ func (s *V2GitStore) ListArchivedGenerations() ([]string, error) {
 			return nil
 		}
 		suffix := strings.TrimPrefix(name, paths.V2FullRefPrefix)
-		if suffix == "current" || !generationRefPattern.MatchString(suffix) {
+		if suffix == "current" || !GenerationRefPattern.MatchString(suffix) {
 			return nil
 		}
 		archived = append(archived, suffix)

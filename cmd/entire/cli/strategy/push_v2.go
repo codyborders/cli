@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -193,9 +192,6 @@ func fetchAndMergeRef(ctx context.Context, target string, refName plumbing.Refer
 	return nil
 }
 
-// generationRefPattern matches the 13-digit archived generation ref suffix format.
-var generationRefPattern = regexp.MustCompile(`^\d{13}$`)
-
 // detectRemoteOnlyArchives discovers archived generation refs on the remote
 // that don't exist locally. Returns them sorted ascending (oldest first).
 func detectRemoteOnlyArchives(ctx context.Context, target string, repo *git.Repository) ([]string, error) {
@@ -219,7 +215,7 @@ func detectRemoteOnlyArchives(ctx context.Context, target string, repo *git.Repo
 		}
 		refName := parts[1]
 		suffix := strings.TrimPrefix(refName, paths.V2FullRefPrefix)
-		if suffix == "current" || !generationRefPattern.MatchString(suffix) {
+		if suffix == "current" || !checkpoint.GenerationRefPattern.MatchString(suffix) {
 			continue
 		}
 		// Only check for existence, not hash equality. A locally-present archive
