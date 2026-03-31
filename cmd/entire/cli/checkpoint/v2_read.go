@@ -165,7 +165,7 @@ func (s *V2GitStore) readTranscriptFromFullRefs(ctx context.Context, checkpointI
 	// Search newly fetched refs only
 	newArchived, err := s.ListArchivedGenerations()
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // Best-effort: fetch-on-demand failure shouldn't block resume
 	}
 	existingSet := make(map[string]bool, len(archived))
 	for _, a := range archived {

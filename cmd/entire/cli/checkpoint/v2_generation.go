@@ -154,43 +154,38 @@ func (s *V2GitStore) AddGenerationJSONToTree(rootTreeHash plumbing.Hash, gen Gen
 // newest = latest commit time. Falls back to time.Now() if the ref has no history.
 // Note: /full/* trees don't contain session metadata (that's on /main), so we
 // derive timestamps from git commit times rather than walking the tree.
-func (s *V2GitStore) computeGenerationTimestamps(_ context.Context, _ plumbing.Hash) (GenerationMetadata, error) {
+func (s *V2GitStore) computeGenerationTimestamps() GenerationMetadata {
+	now := time.Now().UTC()
+	fallback := GenerationMetadata{OldestCheckpointAt: now, NewestCheckpointAt: now}
+
 	refName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
 	ref, err := s.repo.Reference(refName, true)
 	if err != nil {
-		now := time.Now().UTC()
-		return GenerationMetadata{OldestCheckpointAt: now, NewestCheckpointAt: now}, nil
+		return fallback
 	}
 
-	// Walk commit history to find oldest and newest commit times
 	commit, err := s.repo.CommitObject(ref.Hash())
 	if err != nil {
-		now := time.Now().UTC()
-		return GenerationMetadata{OldestCheckpointAt: now, NewestCheckpointAt: now}, nil
+		return fallback
 	}
 
 	newest := commit.Committer.When.UTC()
-	oldest := newest
 
 	// Walk parents to find the oldest commit in this generation
 	iter := commit
-	for {
-		if len(iter.ParentHashes) == 0 {
-			oldest = iter.Committer.When.UTC()
-			break
-		}
+	for len(iter.ParentHashes) > 0 {
 		parent, parentErr := s.repo.CommitObject(iter.ParentHashes[0])
 		if parentErr != nil {
-			oldest = iter.Committer.When.UTC()
 			break
 		}
 		iter = parent
 	}
+	oldest := iter.Committer.When.UTC()
 
 	return GenerationMetadata{
 		OldestCheckpointAt: oldest,
 		NewestCheckpointAt: newest,
-	}, nil
+	}
 }
 
 // generationRefWidth is the zero-padded width of archived generation ref names.
@@ -310,16 +305,7 @@ func (s *V2GitStore) rotateGeneration(ctx context.Context) error {
 	}
 
 	// Write generation.json to the current tree before archiving.
-	gen, genErr := s.computeGenerationTimestamps(ctx, currentTreeHash)
-	if genErr != nil {
-		logging.Warn(ctx, "rotation: failed to compute generation timestamps",
-			slog.String("error", genErr.Error()),
-		)
-		gen = GenerationMetadata{
-			OldestCheckpointAt: time.Now().UTC(),
-			NewestCheckpointAt: time.Now().UTC(),
-		}
-	}
+	gen := s.computeGenerationTimestamps()
 	archiveTreeHash, err := s.AddGenerationJSONToTree(currentTreeHash, gen)
 	if err != nil {
 		return fmt.Errorf("rotation: failed to add generation.json: %w", err)

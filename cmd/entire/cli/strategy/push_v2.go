@@ -132,7 +132,7 @@ func fetchAndMergeRef(ctx context.Context, target string, refName plumbing.Refer
 		remoteOnlyArchives, detectErr := detectRemoteOnlyArchives(ctx, target, repo)
 		if detectErr == nil && len(remoteOnlyArchives) > 0 {
 			err := handleRotationConflict(ctx, target, repo, refName, tmpRefName, remoteOnlyArchives)
-			_ = repo.Storer.RemoveReference(tmpRefName) //nolint:errcheck
+			_ = repo.Storer.RemoveReference(tmpRefName) //nolint:errcheck // cleanup is best-effort
 			return err
 		}
 	}
@@ -250,7 +250,7 @@ func handleRotationConflict(ctx context.Context, target string, repo *git.Reposi
 		return fmt.Errorf("fetch archived generation failed: %s", output)
 	}
 	defer func() {
-		_ = repo.Storer.RemoveReference(archiveTmpRef) //nolint:errcheck
+		_ = repo.Storer.RemoveReference(archiveTmpRef) //nolint:errcheck // cleanup is best-effort
 	}()
 
 	// Get archived generation state
@@ -343,22 +343,22 @@ func handleRotationConflict(ctx context.Context, target string, repo *git.Reposi
 func updateGenerationTimestamps(repo *git.Repository, genBlobHash plumbing.Hash, newestFromLocal time.Time) (object.TreeEntry, error) {
 	blob, err := repo.BlobObject(genBlobHash)
 	if err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to read generation blob: %w", err)
 	}
 	reader, err := blob.Reader()
 	if err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to open generation blob reader: %w", err)
 	}
 	defer reader.Close()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to read generation blob data: %w", err)
 	}
 
 	var gen checkpoint.GenerationMetadata
 	if err := json.Unmarshal(data, &gen); err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to parse generation.json: %w", err)
 	}
 
 	if newestFromLocal.After(gen.NewestCheckpointAt) {
@@ -367,12 +367,12 @@ func updateGenerationTimestamps(repo *git.Repository, genBlobHash plumbing.Hash,
 
 	updatedData, err := json.Marshal(gen)
 	if err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to marshal generation.json: %w", err)
 	}
 
 	newBlobHash, err := checkpoint.CreateBlobFromContent(repo, updatedData)
 	if err != nil {
-		return object.TreeEntry{}, err
+		return object.TreeEntry{}, fmt.Errorf("failed to create generation blob: %w", err)
 	}
 
 	return object.TreeEntry{
@@ -386,8 +386,8 @@ func updateGenerationTimestamps(repo *git.Repository, genBlobHash plumbing.Hash,
 // Pushes /main, /full/current, and the latest archived generation (if any).
 // Older archived generations are immutable and were pushed when created.
 func pushV2Refs(ctx context.Context, target string) {
-	pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2MainRefName))
-	pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2FullCurrentRefName))
+	_ = pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2MainRefName))        //nolint:errcheck // pushRefIfNeeded handles errors internally
+	_ = pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2FullCurrentRefName)) //nolint:errcheck // pushRefIfNeeded handles errors internally
 
 	// Push only the latest archived generation (most likely to be newly created)
 	repo, err := OpenRepository(ctx)
@@ -400,7 +400,7 @@ func pushV2Refs(ctx context.Context, target string) {
 		return
 	}
 	latest := archived[len(archived)-1]
-	pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2FullRefPrefix+latest))
+	_ = pushRefIfNeeded(ctx, target, plumbing.ReferenceName(paths.V2FullRefPrefix+latest)) //nolint:errcheck // pushRefIfNeeded handles errors internally
 }
 
 // shortRefName returns a human-readable short form of a ref name for log output.
