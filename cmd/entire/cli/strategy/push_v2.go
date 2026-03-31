@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 
 	"github.com/go-git/go-git/v6"
@@ -293,6 +295,10 @@ func handleRotationConflict(ctx context.Context, target string, repo *git.Reposi
 	if genEntry, exists := entries[paths.GenerationFileName]; exists {
 		if updatedEntry, updateErr := updateGenerationTimestamps(repo, genEntry.Hash, localCommit.Committer.When.UTC()); updateErr == nil {
 			entries[paths.GenerationFileName] = updatedEntry
+		} else {
+			logging.Warn(ctx, "rotation recovery: failed to update generation timestamps, using stale values",
+				slog.String("error", updateErr.Error()),
+			)
 		}
 	}
 
