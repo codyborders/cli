@@ -141,6 +141,37 @@ func resolvePushSettings(ctx context.Context, pushRemoteName string) pushSetting
 	return ps
 }
 
+// ResolveCheckpointURL returns the checkpoint remote URL if configured, or empty string
+// if not configured or derivation fails. Uses the push remote's protocol for URL construction.
+func ResolveCheckpointURL(ctx context.Context, pushRemoteName string) string {
+	s, err := settings.Load(ctx)
+	if err != nil {
+		return ""
+	}
+	config := s.GetCheckpointRemote()
+	if config == nil {
+		return ""
+	}
+	pushRemoteURL, err := getRemoteURL(ctx, pushRemoteName)
+	if err != nil {
+		return ""
+	}
+	url, err := deriveCheckpointURL(pushRemoteURL, config)
+	if err != nil {
+		return ""
+	}
+	return url
+}
+
+// resolveV2FetchRemote returns the remote to use for v2 fetch operations.
+// Returns the checkpoint remote URL if configured, otherwise "origin".
+func resolveV2FetchRemote(ctx context.Context) string {
+	if url := ResolveCheckpointURL(ctx, "origin"); url != "" {
+		return url
+	}
+	return "origin"
+}
+
 // ResolveRemoteRepo returns the host, owner, and repo name for the given git remote.
 // It parses the remote URL (SSH or HTTPS) and extracts the components.
 // For example, git@github.com:org/my-repo.git returns ("github.com", "org", "my-repo").

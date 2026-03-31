@@ -191,14 +191,13 @@ func (s *V2GitStore) readTranscriptFromFullRefs(ctx context.Context, checkpointI
 	return nil, nil
 }
 
-// fetchRemoteFullRefs discovers and fetches /full/* refs from origin that aren't local.
-// Uses "origin" directly — checkpoint_remote is not accessible from the checkpoint
-// package without an import cycle, and the push path handles checkpoint_remote separately.
+// fetchRemoteFullRefs discovers and fetches /full/* refs from the configured
+// FetchRemote that aren't local.
 func (s *V2GitStore) fetchRemoteFullRefs(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	lsCmd := exec.CommandContext(ctx, "git", "ls-remote", "origin", paths.V2FullRefPrefix+"*")
+	lsCmd := exec.CommandContext(ctx, "git", "ls-remote", s.FetchRemote, paths.V2FullRefPrefix+"*")
 	output, err := lsCmd.Output()
 	if err != nil {
 		return fmt.Errorf("ls-remote failed: %w", err)
@@ -227,7 +226,7 @@ func (s *V2GitStore) fetchRemoteFullRefs(ctx context.Context) error {
 		return nil
 	}
 
-	args := append([]string{"fetch", "origin"}, refSpecs...)
+	args := append([]string{"fetch", s.FetchRemote}, refSpecs...)
 	fetchCmd := exec.CommandContext(ctx, "git", args...)
 	if fetchOutput, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		return fmt.Errorf("fetch failed: %s", fetchOutput)

@@ -20,7 +20,7 @@ import (
 func TestReadGeneration_EmptyTree_ReturnsDefault(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Build an empty tree
 	emptyTree, err := BuildTreeFromEntries(repo, map[string]object.TreeEntry{})
@@ -36,7 +36,7 @@ func TestReadGeneration_EmptyTree_ReturnsDefault(t *testing.T) {
 func TestReadGeneration_ParsesJSON(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	now := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
@@ -62,7 +62,7 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 func TestWriteGeneration_RoundTrips(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	now := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
 	original := GenerationMetadata{
@@ -91,7 +91,7 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 func TestReadGenerationFromRef(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Create a ref with generation.json in its tree
 	now := time.Date(2026, 3, 25, 14, 0, 0, 0, time.UTC)
@@ -122,7 +122,7 @@ func TestReadGenerationFromRef(t *testing.T) {
 func TestAddGenerationJSONToTree(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Start with a root tree that has a shard directory entry (simulating checkpoint data)
 	shardEntries := map[string]object.TreeEntry{}
@@ -164,7 +164,7 @@ func TestAddGenerationJSONToTree(t *testing.T) {
 func TestCountCheckpointsInTree_EmptyTree(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	count, err := store.CountCheckpointsInTree(plumbing.ZeroHash)
 	require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestCountCheckpointsInTree_EmptyTree(t *testing.T) {
 func TestCountCheckpointsInTree_CountsShardDirectories(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	// Write 3 checkpoints to /full/current
@@ -209,7 +209,7 @@ func TestCountCheckpointsInTree_CountsShardDirectories(t *testing.T) {
 func TestWriteCommittedFull_NoGenerationJSON(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("d1e2f3a4b5c6")
@@ -239,7 +239,7 @@ func TestWriteCommittedFull_NoGenerationJSON(t *testing.T) {
 func TestUpdateCommitted_DoesNotAddGenerationJSON(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	ctx := context.Background()
 
 	cpID := id.MustCheckpointID("a4b5c6d1e2f3")
@@ -282,7 +282,7 @@ func TestUpdateCommitted_DoesNotAddGenerationJSON(t *testing.T) {
 // createArchivedRef creates a dummy archived generation ref for testing.
 func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
 	t.Helper()
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Build a minimal tree with just generation.json
 	now := time.Now().UTC()
@@ -306,7 +306,7 @@ func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
 func TestListArchivedGenerations_Empty(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	archived, err := store.ListArchivedGenerations()
 	require.NoError(t, err)
@@ -316,7 +316,7 @@ func TestListArchivedGenerations_Empty(t *testing.T) {
 func TestListArchivedGenerations_FindsArchived(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	createArchivedRef(t, repo, 1)
 	createArchivedRef(t, repo, 2)
@@ -329,7 +329,7 @@ func TestListArchivedGenerations_FindsArchived(t *testing.T) {
 func TestListArchivedGenerations_ExcludesCurrent(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Create /full/current ref
 	require.NoError(t, store.ensureRef(plumbing.ReferenceName(paths.V2FullCurrentRefName)))
@@ -345,7 +345,7 @@ func TestListArchivedGenerations_ExcludesCurrent(t *testing.T) {
 func TestNextGenerationNumber_NoArchives(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	next, err := store.nextGenerationNumber()
 	require.NoError(t, err)
@@ -355,7 +355,7 @@ func TestNextGenerationNumber_NoArchives(t *testing.T) {
 func TestNextGenerationNumber_WithExisting(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	createArchivedRef(t, repo, 1)
 	createArchivedRef(t, repo, 2)
@@ -390,7 +390,7 @@ func populateFullCurrent(t *testing.T, store *V2GitStore, n, offset int) []id.Ch
 func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	store.maxCheckpointsPerGeneration = 3
 
 	// Write 3 checkpoints — the 3rd triggers auto-rotation via writeCommittedFullTranscript
@@ -439,7 +439,7 @@ func TestRotateGeneration_ArchivesCurrentAndCreatesNewOrphan(t *testing.T) {
 func TestRotateGeneration_SequentialNumbering(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 	store.maxCheckpointsPerGeneration = 2
 	ctx := context.Background()
 
@@ -479,7 +479,7 @@ func TestRotateGeneration_SequentialNumbering(t *testing.T) {
 func TestReadGeneration_BackwardCompatible(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)
-	store := NewV2GitStore(repo)
+	store := NewV2GitStore(repo, "origin")
 
 	// Simulate old format with a checkpoints field
 	oldJSON := `{

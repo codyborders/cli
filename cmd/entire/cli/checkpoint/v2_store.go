@@ -24,6 +24,11 @@ type V2GitStore struct {
 	// maxCheckpointsPerGeneration overrides the rotation threshold for testing.
 	// Zero means use DefaultMaxCheckpointsPerGeneration.
 	maxCheckpointsPerGeneration int
+
+	// FetchRemote is the git remote used for fetch-on-demand operations (e.g.,
+	// fetching /full/* refs during entire resume). Defaults to "origin".
+	// Set to the checkpoint remote URL when checkpoint_remote is configured.
+	FetchRemote string
 }
 
 // maxCheckpoints returns the effective rotation threshold.
@@ -35,10 +40,13 @@ func (s *V2GitStore) maxCheckpoints() int {
 }
 
 // NewV2GitStore creates a new v2 checkpoint store backed by the given git repository.
-func NewV2GitStore(repo *git.Repository) *V2GitStore {
+// fetchRemote is the git remote used for fetch-on-demand operations (e.g., fetching
+// /full/* refs during entire resume). Pass "origin" or the checkpoint remote URL.
+func NewV2GitStore(repo *git.Repository, fetchRemote string) *V2GitStore {
 	return &V2GitStore{
-		repo: repo,
-		gs:   &GitStore{repo: repo},
+		repo:        repo,
+		gs:          &GitStore{repo: repo},
+		FetchRemote: fetchRemote,
 	}
 }
 

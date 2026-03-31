@@ -132,7 +132,7 @@ func TestFetchV2MainRefIfMissing_SkipsWhenExists(t *testing.T) {
 // writeV2Checkpoint writes a checkpoint to both /main and /full/current via V2GitStore.
 func writeV2Checkpoint(t *testing.T, repo *git.Repository, cpID id.CheckpointID, sessionID string) {
 	t.Helper()
-	store := checkpoint.NewV2GitStore(repo)
+	store := checkpoint.NewV2GitStore(repo, "origin")
 	err := store.WriteCommitted(context.Background(), checkpoint.WriteCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    sessionID,
@@ -309,7 +309,7 @@ func TestFetchAndMergeRef_RotationConflict(t *testing.T) {
 	writeV2Checkpoint(t, remoteRepo, id.MustCheckpointID("112233445566"), "remote-session")
 
 	// Manually rotate: archive /full/current, create fresh orphan
-	remoteStore := checkpoint.NewV2GitStore(remoteRepo)
+	remoteStore := checkpoint.NewV2GitStore(remoteRepo, "origin")
 	currentRef, err := remoteRepo.Reference(fullCurrentRef, true)
 	require.NoError(t, err)
 
@@ -359,7 +359,7 @@ func TestFetchAndMergeRef_RotationConflict(t *testing.T) {
 	// Verify: local /full/current should now be the fresh orphan from remote
 	localRepo, err = git.PlainOpen(localDir)
 	require.NoError(t, err)
-	localStore := checkpoint.NewV2GitStore(localRepo)
+	localStore := checkpoint.NewV2GitStore(localRepo, "origin")
 	_, freshTreeHash, err := localStore.GetRefState(fullCurrentRef)
 	require.NoError(t, err)
 	freshCount, err := localStore.CountCheckpointsInTree(freshTreeHash)
