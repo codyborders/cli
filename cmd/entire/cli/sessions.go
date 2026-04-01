@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/charmbracelet/huh"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
@@ -62,7 +63,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().BoolVar(&allFlag, "all", false, "Stop all active sessions in current worktree")
+	cmd.Flags().BoolVar(&allFlag, "all", false, "Stop all active sessions")
 	cmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Skip confirmation prompt")
 
 	return cmd
@@ -88,41 +89,27 @@ func runStop(ctx context.Context, cmd *cobra.Command, sessionID string, all, for
 		return runStopAll(ctx, cmd, activeSessions, force)
 	}
 
-	// No-flags path: scope to current worktree before presenting options.
-	// RunE already validated the git repo, so this call succeeds in practice.
-	worktreePath, err := paths.WorktreeRoot(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to resolve worktree root: %w", err)
-	}
-	var scoped []*strategy.SessionState
-	for _, s := range activeSessions {
-		if s.WorktreePath == worktreePath || s.WorktreePath == "" {
-			scoped = append(scoped, s)
-		}
-	}
-
-	if len(scoped) == 0 {
+	// No-flags path: show all active sessions across all worktrees.
+	// This aligns with `entire status` which displays sessions globally.
+	// Users see worktree labels in the multi-select to make informed choices.
+	if len(activeSessions) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No active sessions.")
 		return nil
 	}
 
 	// One active session: confirm + stop.
-	if len(scoped) == 1 {
-		return runStopSession(ctx, cmd, scoped[0].SessionID, force)
+	if len(activeSessions) == 1 {
+		return runStopSession(ctx, cmd, activeSessions[0].SessionID, force)
 	}
 
 	// Multiple active sessions: show TUI multi-select.
-	return runStopMultiSelect(ctx, cmd, scoped, force)
+	return runStopMultiSelect(ctx, cmd, activeSessions, force)
 }
 
-// filterActiveSessions returns sessions in PhaseIdle or PhaseActive — all sessions
-// that have not been explicitly ended. Both phases are considered stoppable: IDLE
-// means the agent finished its last turn but the session is still open.
-//
-// The dual check (Phase != PhaseEnded AND EndedAt == nil) is intentionally stricter
-// than status.go's EndedAt-only check: it ensures sessions where only the state
-// machine transition succeeded (Phase=Ended) but EndedAt was never written are still
-// treated as ended, avoiding an accidental re-stop of a partially-ended session.
+// filterActiveSessions returns sessions that have not been explicitly ended.
+// A session is considered ended if Phase == PhaseEnded OR EndedAt is set.
+// This matches the logic in status.go's writeActiveSessions for consistency:
+// any session visible in `entire status` should also be visible in `sessions stop`.
 func filterActiveSessions(states []*strategy.SessionState) []*strategy.SessionState {
 	var active []*strategy.SessionState
 	for _, s := range states {
@@ -134,6 +121,20 @@ func filterActiveSessions(states []*strategy.SessionState) []*strategy.SessionSt
 		}
 	}
 	return active
+}
+
+// sessionWorktreeLabel returns the worktree display label for a session.
+// Uses WorktreeID if available, falls back to the last path component of
+// WorktreePath, or "(unknown)" for empty values (legacy sessions without
+// worktree tracking). Matches status.go's unknownPlaceholder convention.
+func sessionWorktreeLabel(s *strategy.SessionState) string {
+	if s.WorktreeID != "" {
+		return s.WorktreeID
+	}
+	if s.WorktreePath != "" {
+		return filepath.Base(s.WorktreePath)
+	}
+	return "(unknown)"
 }
 
 // runStopSession stops a single session by ID, with optional confirmation.
@@ -174,25 +175,9 @@ func runStopSession(ctx context.Context, cmd *cobra.Command, sessionID string, f
 	return stopSessionAndPrint(ctx, cmd, state)
 }
 
-// runStopAll stops all active sessions scoped to the current worktree.
+// runStopAll stops all active sessions across all worktrees.
 func runStopAll(ctx context.Context, cmd *cobra.Command, activeSessions []*strategy.SessionState, force bool) error {
-	// Scope to current worktree. Sessions with an empty WorktreePath predate
-	// worktree-path tracking and cannot be attributed to any specific worktree —
-	// including them here prevents them from being permanently unreachable via --all.
-	// RunE already validated the git repo, so this call succeeds in practice.
-	worktreePath, err := paths.WorktreeRoot(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to resolve worktree root: %w", err)
-	}
-
-	var toStop []*strategy.SessionState
-	for _, s := range activeSessions {
-		if s.WorktreePath == worktreePath || s.WorktreePath == "" {
-			toStop = append(toStop, s)
-		}
-	}
-
-	if len(toStop) == 0 {
+	if len(activeSessions) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No active sessions.")
 		return nil
 	}
@@ -202,7 +187,7 @@ func runStopAll(ctx context.Context, cmd *cobra.Command, activeSessions []*strat
 		form := NewAccessibleForm(
 			huh.NewGroup(
 				huh.NewConfirm().
-					Title(fmt.Sprintf("Stop %d session(s)?", len(toStop))).
+					Title(fmt.Sprintf("Stop %d session(s)?", len(activeSessions))).
 					Value(&confirmed),
 			),
 		)
@@ -215,16 +200,21 @@ func runStopAll(ctx context.Context, cmd *cobra.Command, activeSessions []*strat
 		}
 	}
 
-	return stopSelectedSessions(ctx, cmd, toStop)
+	return stopSelectedSessions(ctx, cmd, activeSessions)
 }
 
 // runStopMultiSelect shows a TUI multi-select for multiple active sessions.
 func runStopMultiSelect(ctx context.Context, cmd *cobra.Command, activeSessions []*strategy.SessionState, force bool) error {
 	options := make([]huh.Option[string], len(activeSessions))
 	for i, s := range activeSessions {
-		label := fmt.Sprintf("%s · %s", s.AgentType, s.SessionID)
+		wt := sessionWorktreeLabel(s)
+		label := fmt.Sprintf("%s · %s · %s", s.AgentType, wt, s.SessionID)
 		if s.LastPrompt != "" {
-			label = fmt.Sprintf("%s · %q", label, s.LastPrompt)
+			prompt := s.LastPrompt
+			if len(prompt) > 40 {
+				prompt = prompt[:37] + "..."
+			}
+			label = fmt.Sprintf("%s · %q", label, prompt)
 		}
 		options[i] = huh.NewOption(label, s.SessionID)
 	}

@@ -283,7 +283,7 @@ func TestStopCmd_AllFlag(t *testing.T) {
 	}
 }
 
-func TestStopCmd_AllFlag_ExcludesOtherWorktrees(t *testing.T) {
+func TestStopCmd_AllFlag_IncludesAllWorktrees(t *testing.T) {
 	setupStopTestRepo(t)
 
 	ctx := context.Background()
@@ -314,20 +314,15 @@ func TestStopCmd_AllFlag_ExcludesOtherWorktrees(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	stopped, err := strategy.LoadSessionState(ctx, "test-all-scope-in")
-	if err != nil {
-		t.Fatalf("LoadSessionState(in-scope) error = %v", err)
-	}
-	if stopped == nil || stopped.Phase != session.PhaseEnded {
-		t.Errorf("expected in-scope session to be PhaseEnded, got: %v", stopped.Phase)
-	}
-
-	untouched, err := strategy.LoadSessionState(ctx, "test-all-scope-out")
-	if err != nil {
-		t.Fatalf("LoadSessionState(out-of-scope) error = %v", err)
-	}
-	if untouched == nil || untouched.Phase == session.PhaseEnded {
-		t.Errorf("expected out-of-scope session to remain non-ended, got: %v", untouched.Phase)
+	// Both sessions should be stopped (--all is no longer worktree-scoped)
+	for _, id := range []string{"test-all-scope-in", "test-all-scope-out"} {
+		loaded, err := strategy.LoadSessionState(ctx, id)
+		if err != nil {
+			t.Fatalf("LoadSessionState(%s) error = %v", id, err)
+		}
+		if loaded == nil || loaded.Phase != session.PhaseEnded {
+			t.Errorf("expected session %s to be PhaseEnded, got: %v", id, loaded.Phase)
+		}
 	}
 }
 
@@ -514,6 +509,27 @@ func TestStopCmd_AlreadyStopped_EndedAtOnly(t *testing.T) {
 	}
 }
 
+// TestFilterActiveSessions_ExcludesPhaseEndedWithoutEndedAt verifies that sessions
+// created by `entire attach` (Phase=PhaseEnded, EndedAt=nil) are excluded.
+func TestFilterActiveSessions_ExcludesPhaseEndedWithoutEndedAt(t *testing.T) {
+	t.Parallel()
+
+	// Simulates a session created by `entire attach` — Phase is ended but EndedAt is nil.
+	attachEnded := makeSessionState("attach-ended", session.PhaseEnded)
+	// EndedAt intentionally nil
+
+	activeIdle := makeSessionState("active-idle", session.PhaseIdle)
+
+	result := filterActiveSessions([]*strategy.SessionState{attachEnded, activeIdle})
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 active session, got %d", len(result))
+	}
+	if result[0].SessionID != "active-idle" {
+		t.Errorf("expected active-idle, got: %s", result[0].SessionID)
+	}
+}
+
 // TestFilterActiveSessions_ExcludesEndedAtSet verifies that filterActiveSessions
 // excludes sessions with EndedAt set regardless of Phase, and includes sessions in
 // both PhaseIdle and PhaseActive.
@@ -542,62 +558,39 @@ func TestFilterActiveSessions_ExcludesEndedAtSet(t *testing.T) {
 	}
 }
 
-// TestStopCmd_WorktreeScoping_NoFlags verifies that the no-flags path scopes session
-// listing to the current worktree, so sessions from other worktrees are invisible.
-func TestStopCmd_WorktreeScoping_NoFlags(t *testing.T) {
+// TestStopCmd_NoFlags_CrossWorktreeSession verifies that a session from a
+// different worktree is reachable via the no-args single-session path.
+func TestStopCmd_NoFlags_CrossWorktreeSession(t *testing.T) {
 	setupStopTestRepo(t)
 
 	ctx := context.Background()
-	worktreePath, err := paths.WorktreeRoot(ctx)
-	if err != nil {
-		t.Fatalf("WorktreeRoot() error = %v", err)
-	}
 
-	// One session in the current worktree, one in a foreign worktree.
-	inScope := makeSessionState("test-stop-scope-in", session.PhaseIdle)
-	inScope.WorktreePath = worktreePath
+	// Session in a different worktree — should be stoppable via no-args path.
+	remote := makeSessionState("test-cross-wt-stop", session.PhaseIdle)
+	remote.WorktreePath = "/other/worktree"
+	remote.WorktreeID = "other-wt"
+	remote.StepCount = 0
 
-	outOfScope := makeSessionState("test-stop-scope-out", session.PhaseIdle)
-	outOfScope.WorktreePath = "/some/other/worktree"
-
-	for _, s := range []*strategy.SessionState{inScope, outOfScope} {
-		if err := strategy.SaveSessionState(ctx, s); err != nil {
-			t.Fatalf("SaveSessionState() error = %v", err)
-		}
+	if err := strategy.SaveSessionState(ctx, remote); err != nil {
+		t.Fatalf("SaveSessionState() error = %v", err)
 	}
 
 	cmd := newStopCmd()
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	// Single in-scope session → confirm + stop path (bypasses TUI selector).
+	// Single session + --force → bypasses TUI, goes through runStopSession.
 	cmd.SetArgs([]string{"--force"})
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	// In-scope session must be stopped.
-	stopped, err := strategy.LoadSessionState(ctx, "test-stop-scope-in")
+	loaded, err := strategy.LoadSessionState(ctx, "test-cross-wt-stop")
 	if err != nil {
-		t.Fatalf("LoadSessionState(in-scope) error = %v", err)
+		t.Fatalf("LoadSessionState() error = %v", err)
 	}
-	if stopped == nil {
-		t.Fatal("expected in-scope session to exist")
-	}
-	if stopped.Phase != session.PhaseEnded {
-		t.Errorf("expected in-scope session Phase=PhaseEnded, got: %v", stopped.Phase)
-	}
-
-	// Out-of-scope session must be untouched.
-	untouched, err := strategy.LoadSessionState(ctx, "test-stop-scope-out")
-	if err != nil {
-		t.Fatalf("LoadSessionState(out-of-scope) error = %v", err)
-	}
-	if untouched == nil {
-		t.Fatal("expected out-of-scope session to exist")
-	}
-	if untouched.Phase == session.PhaseEnded {
-		t.Errorf("expected out-of-scope session to remain non-ended, got PhaseEnded")
+	if loaded == nil || loaded.Phase != session.PhaseEnded {
+		t.Errorf("expected cross-worktree session to be PhaseEnded, got: %v", loaded.Phase)
 	}
 }
