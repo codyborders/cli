@@ -1,9 +1,10 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -12,27 +13,30 @@ import (
 // openCodeCommandTimeout is the maximum time to wait for opencode CLI commands.
 const openCodeCommandTimeout = 30 * time.Second
 
-// runOpenCodeExport runs `opencode export <sessionID>` to export a session
-// from OpenCode's database. Returns the JSON export data as bytes.
-func runOpenCodeExport(ctx context.Context, sessionID string) ([]byte, error) {
+// runOpenCodeExportToFile runs `opencode export <sessionID>` and redirects stdout
+// to outputPath. This avoids pipe/stdout capture truncation bugs in some opencode versions.
+func runOpenCodeExportToFile(ctx context.Context, sessionID, outputPath string) error {
 	ctx, cancel := context.WithTimeout(ctx, openCodeCommandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "opencode", "export", sessionID)
-	output, err := cmd.Output()
+	file, err := os.Create(outputPath)
 	if err != nil {
+		return fmt.Errorf("failed to create export file: %w", err)
+	}
+	defer file.Close()
+
+	cmd := exec.CommandContext(ctx, "opencode", "export", sessionID)
+	cmd.Stdout = file
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("opencode export timed out after %s", openCodeCommandTimeout)
+			return fmt.Errorf("opencode export timed out after %s", openCodeCommandTimeout)
 		}
-		// Get stderr for better error message
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("opencode export failed: %w (stderr: %s)", err, string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("opencode export failed: %w", err)
+		return fmt.Errorf("opencode export failed: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return output, nil
+	return nil
 }
 
 // runOpenCodeSessionDelete runs `opencode session delete <sessionID>` to remove

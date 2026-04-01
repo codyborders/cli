@@ -2,12 +2,15 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -357,4 +360,45 @@ func TestParseHookEvent_TurnEnd_InvalidSessionID(t *testing.T) {
 	if !strings.Contains(err.Error(), "contains path separators") {
 		t.Errorf("expected 'contains path separators' error, got: %v", err)
 	}
+}
+
+func TestFetchAndCacheExport_UsesRedirectedExportWhenPipeOutputWouldBeInvalid(t *testing.T) {
+	tmpDir := t.TempDir()
+	testutil.InitRepo(t, tmpDir)
+	t.Chdir(tmpDir)
+
+	paths.ClearWorktreeRootCache()
+	t.Cleanup(paths.ClearWorktreeRootCache)
+
+	binDir := filepath.Join(tmpDir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+
+	opencodePath := filepath.Join(binDir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "export" ]; then
+  # Simulate truncated/invalid JSON only when stdout is a pipe.
+  if [ -p /dev/fd/1 ]; then
+    printf '{"info":'
+    exit 0
+  fi
+
+  # Redirection path should return full valid JSON.
+  printf '{"info":{"id":"%s"},"messages":[]}\n' "$2"
+  exit 0
+fi
+
+echo "unexpected args" >&2
+exit 1
+`
+	require.NoError(t, os.WriteFile(opencodePath, []byte(script), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ag := &OpenCodeAgent{}
+	transcriptPath, err := ag.fetchAndCacheExport(context.Background(), "ses_abc123")
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(transcriptPath)
+	require.NoError(t, err)
+	require.True(t, json.Valid(content), "expected cached transcript to be valid JSON")
+	require.Contains(t, string(content), "\"ses_abc123\"")
 }

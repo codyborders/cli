@@ -184,32 +184,29 @@ func (a *OpenCodeAgent) fetchAndCacheExport(ctx context.Context, sessionID strin
 		return "", fmt.Errorf("mock export file not found: %s (ENTIRE_TEST_OPENCODE_MOCK_EXPORT is set)", tmpFile)
 	}
 
-	// Call opencode export to get the transcript (always refresh on each turn)
-	data, err := runOpenCodeExport(ctx, sessionID)
-	if err != nil {
+	// Write export directly to temp file under .entire. Avoid stdout capture,
+	// which can truncate large payloads in some opencode versions.
+	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	if err := runOpenCodeExportToFile(ctx, sessionID, tmpFile); err != nil {
 		return "", fmt.Errorf("opencode export failed: %w", err)
 	}
 
-	// Validate output is valid JSON before caching
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read export file: %w", err)
+	}
+
 	if !json.Valid(data) {
-		// Emit prefix/suffix at DEBUG only — the error message propagates to
-		// WARN logs and could contain sensitive transcript/user content.
 		logging.Debug(logging.WithComponent(ctx, "lifecycle"),
-			"opencode export returned invalid JSON",
+			"opencode export file contained invalid JSON",
 			slog.Int("bytes", len(data)),
 			slog.String("prefix", string(data[:min(len(data), 200)])),
 			slog.String("suffix", string(data[max(0, len(data)-200):])),
 		)
 		return "", fmt.Errorf("opencode export returned invalid JSON (%d bytes)", len(data))
-	}
-
-	// Write to temp directory under .entire
-	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
-		return "", fmt.Errorf("failed to create temp dir: %w", err)
-	}
-
-	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write export file: %w", err)
 	}
 
 	return tmpFile, nil
