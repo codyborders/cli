@@ -52,7 +52,7 @@ func (s *V2GitStore) WriteCommitted(ctx context.Context, opts WriteCommittedOpti
 // UpdateCommitted replaces the prompts and/or transcript for an existing v2 checkpoint.
 // Called at stop time to finalize checkpoints with the complete session transcript.
 //
-// On /main: replaces prompts (transcript is not stored there).
+// On /main: replaces prompts and compact transcript (if provided).
 // On /full/current: replaces the raw transcript (if provided).
 //
 // Returns ErrCheckpointNotFound if the checkpoint doesn't exist on /main.
@@ -75,7 +75,7 @@ func (s *V2GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOp
 	return nil
 }
 
-// updateCommittedMain updates prompts on the /main ref for an existing checkpoint.
+// updateCommittedMain updates prompts and compact transcript on the /main ref for an existing checkpoint.
 // Returns the session index for coordination with /full/current.
 func (s *V2GitStore) updateCommittedMain(ctx context.Context, opts UpdateCommittedOptions) (int, error) {
 	refName := plumbing.ReferenceName(paths.V2MainRefName)
