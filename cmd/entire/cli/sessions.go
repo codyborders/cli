@@ -23,6 +23,18 @@ func newSessionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sessions",
 		Short: "Manage agent sessions tracked by Entire",
+		Long: `View and manage agent sessions tracked by Entire.
+
+Commands:
+  list    List all sessions across all worktrees
+  info    Show detailed information for a specific session
+  stop    Stop one or more active sessions
+
+Examples:
+  entire sessions list                     List all sessions
+  entire sessions info <session-id>        Show session details
+  entire sessions info <session-id> --json Output as JSON
+  entire sessions stop                     Interactive stop`,
 	}
 
 	cmd.AddCommand(newListCmd())
@@ -47,7 +59,7 @@ so no condensation or checkpoint-writing occurs. To flush pending work, commit f
 Examples:
   entire sessions stop                     No sessions: exits. One session: confirm and stop. Multiple: show selector
   entire sessions stop <session-id>        Stop a specific session by ID
-  entire sessions stop --all               Stop all active sessions in current worktree
+  entire sessions stop --all               Stop all active sessions
   entire sessions stop --force             Skip confirmation prompt`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -282,8 +294,8 @@ Shows agent, model, status, worktree, timing, token usage, checkpoint linkage,
 and files touched. Works for both active and ended sessions.
 
 Examples:
-  entire sessions info 639f4185-7de6-4a6c-9bcb-9f2ef841f919
-  entire sessions info 639f4185-7de6-4a6c-9bcb-9f2ef841f919 --json`,
+  entire sessions info <session-id>
+  entire sessions info <session-id> --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
