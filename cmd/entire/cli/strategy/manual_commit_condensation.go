@@ -26,6 +26,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/transcript"
 	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
+	"github.com/entireio/cli/redact"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -919,8 +920,8 @@ func (s *ManualCommitStrategy) cleanupShadowBranchIfUnused(ctx context.Context, 
 
 // compactTranscriptForV2 produces the Entire Transcript Format (transcript.jsonl)
 // from a raw agent transcript. Returns nil if compaction cannot be performed
-// (nil agent, empty transcript, or compaction error) — callers treat nil as
-// "skip writing transcript.jsonl to /main".
+// (nil agent, empty transcript, redaction failure, or compaction error) —
+// callers treat nil as "skip writing transcript.jsonl to /main".
 func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []byte, checkpointTranscriptStart int) []byte {
 	if ag == nil || len(transcript) == 0 {
 		return nil
@@ -929,7 +930,16 @@ func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []by
 		return nil
 	}
 
-	compacted, err := compact.Compact(transcript, compact.MetadataFields{
+	redactedTranscript, err := redact.JSONLBytes(transcript)
+	if err != nil {
+		logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
+			slog.String("agent", string(ag.Name())),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+
+	compacted, err := compact.Compact(redactedTranscript, compact.MetadataFields{
 		Agent:      string(ag.Name()),
 		CLIVersion: versioninfo.Version,
 		StartLine:  checkpointTranscriptStart,
