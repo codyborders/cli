@@ -463,7 +463,7 @@ func FetchV2MainTreeOnly(ctx context.Context) error {
 
 	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, paths.V2MainRefName)
 
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "--depth=1", "--filter=blob:none", "origin", refSpec)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, "origin", "fetch", "--depth=1", "--filter=blob:none", "origin", refSpec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("v2 treeless fetch timed out after 2 minutes")
@@ -482,7 +482,7 @@ func FetchV2MainRef(ctx context.Context) error {
 
 	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, paths.V2MainRefName)
 
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", refSpec)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, "origin", "fetch", "origin", refSpec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("v2 fetch timed out after 2 minutes")
