@@ -148,6 +148,26 @@ func (s *V2GitStore) updateCommittedMain(ctx context.Context, opts UpdateCommitt
 		if err := s.writeCompactTranscriptHash(opts.CompactTranscript, sessionPath, entries); err != nil {
 			return 0, fmt.Errorf("failed to write compact transcript hash: %w", err)
 		}
+
+		// Keep root checkpoint summary in sync with compact artifact paths.
+		if sessionIndex >= 0 && sessionIndex < len(summary.Sessions) {
+			summary.Sessions[sessionIndex].Transcript = "/" + sessionPath + paths.CompactTranscriptFileName
+			summary.Sessions[sessionIndex].ContentHash = "/" + sessionPath + paths.CompactTranscriptHashFileName
+
+			summaryBytes, err := jsonutil.MarshalIndentWithNewline(summary, "", "  ")
+			if err != nil {
+				return 0, fmt.Errorf("failed to marshal checkpoint summary: %w", err)
+			}
+			summaryHash, err := CreateBlobFromContent(s.repo, summaryBytes)
+			if err != nil {
+				return 0, fmt.Errorf("failed to create checkpoint summary blob: %w", err)
+			}
+			entries[rootMetadataPath] = object.TreeEntry{
+				Name: rootMetadataPath,
+				Mode: filemode.Regular,
+				Hash: summaryHash,
+			}
+		}
 	}
 
 	newTreeHash, err := s.gs.spliceCheckpointSubtree(rootTreeHash, opts.CheckpointID, basePath, entries)

@@ -415,6 +415,14 @@ func TestV2GitStore_UpdateCommitted_WritesCompactTranscript(t *testing.T) {
 
 	hashContent := v2ReadFile(t, tree, cpPath+"/0/"+paths.CompactTranscriptHashFileName)
 	assert.True(t, strings.HasPrefix(hashContent, "sha256:"))
+
+	// Root summary paths should stay in sync after UpdateCommitted
+	summaryContent := v2ReadFile(t, tree, cpPath+"/"+paths.MetadataFileName)
+	var summary CheckpointSummary
+	require.NoError(t, json.Unmarshal([]byte(summaryContent), &summary))
+	require.Len(t, summary.Sessions, 1)
+	assert.Contains(t, summary.Sessions[0].Transcript, paths.CompactTranscriptFileName)
+	assert.Contains(t, summary.Sessions[0].ContentHash, paths.CompactTranscriptHashFileName)
 }
 
 func TestV2GitStore_WriteCommittedMain_MultiSession(t *testing.T) {
