@@ -554,11 +554,18 @@ func setupAttachTestRepo(t *testing.T) {
 }
 
 // setupClaudeTranscript creates a fake Claude transcript file.
+// The file's mtime is backdated so that waitForTranscriptFlush treats it as
+// stale and skips the 3-second poll loop.
 func setupClaudeTranscript(t *testing.T, sessionID, content string) {
 	t.Helper()
 	claudeDir := t.TempDir()
 	t.Setenv("ENTIRE_TEST_CLAUDE_PROJECT_DIR", claudeDir)
-	if err := os.WriteFile(filepath.Join(claudeDir, sessionID+".jsonl"), []byte(content), 0o600); err != nil {
+	fpath := filepath.Join(claudeDir, sessionID+".jsonl")
+	if err := os.WriteFile(fpath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-3 * time.Minute)
+	if err := os.Chtimes(fpath, stale, stale); err != nil {
 		t.Fatal(err)
 	}
 }
