@@ -459,8 +459,7 @@ func fetchMetadataBranchIfMissing(ctx context.Context, remoteURL string) error {
 }
 
 // fetchV2MainRefIfMissing fetches the v2 /main ref from a URL only if it doesn't
-// exist locally. Same pattern as fetchMetadataBranchIfMissing but for custom refs
-// under refs/entire/ (uses explicit refspec instead of refs/heads/).
+// exist locally. Delegates to FetchV2MainFromURL for the actual fetch.
 func fetchV2MainRefIfMissing(ctx context.Context, remoteURL string) error {
 	repo, err := OpenRepository(ctx)
 	if err != nil {
@@ -472,30 +471,9 @@ func fetchV2MainRefIfMissing(ctx context.Context, remoteURL string) error {
 		return nil // Ref exists locally, skip fetch
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, checkpointRemoteFetchTimeout)
-	defer cancel()
-
-	tmpRef := "refs/entire-fetch-tmp/v2-main"
-	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, tmpRef)
-	fetchCmd := exec.CommandContext(fetchCtx, "git", "fetch", "--no-tags", remoteURL, refSpec)
-	fetchCmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-	)
-	if err := fetchCmd.Run(); err != nil {
-		return nil
+	if err := FetchV2MainFromURL(ctx, remoteURL); err != nil {
+		return nil //nolint:nilerr // Fetch failure is not fatal — ref may not exist on remote yet
 	}
-
-	fetchedRef, err := repo.Reference(plumbing.ReferenceName(tmpRef), true)
-	if err != nil {
-		return nil
-	}
-
-	newRef := plumbing.NewHashReference(refName, fetchedRef.Hash())
-	if err := repo.Storer.SetReference(newRef); err != nil {
-		return fmt.Errorf("failed to create local ref from fetched: %w", err)
-	}
-
-	_ = repo.Storer.RemoveReference(plumbing.ReferenceName(tmpRef)) //nolint:errcheck // cleanup is best-effort
 
 	logging.Info(ctx, "checkpoint-remote: fetched v2 /main ref from URL")
 	return nil
