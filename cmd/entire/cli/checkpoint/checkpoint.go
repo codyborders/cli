@@ -289,6 +289,11 @@ type WriteCommittedOptions struct {
 	//   - the transcript was empty or too short to summarize
 	//   - the checkpoint predates the summarization feature
 	Summary *Summary
+
+	// CompactTranscript is the Entire Transcript Format (transcript.jsonl) bytes.
+	// Written to v2 /main ref alongside metadata. May be nil if compaction
+	// was not performed (unknown agent, compaction error, empty transcript).
+	CompactTranscript []byte
 }
 
 // UpdateCommittedOptions contains options for updating an existing committed checkpoint.
@@ -310,6 +315,10 @@ type UpdateCommittedOptions struct {
 
 	// Agent identifies the agent type (needed for transcript chunking)
 	Agent types.AgentType
+
+	// CompactTranscript is the updated Entire Transcript Format bytes.
+	// If non-nil, replaces the existing transcript.jsonl on v2 /main.
+	CompactTranscript []byte
 }
 
 // CommittedInfo contains summary information about a committed checkpoint.
@@ -419,8 +428,8 @@ func (m CommittedMetadata) GetTranscriptStart() int {
 // Used in CheckpointSummary.Sessions to map session IDs to their file locations.
 type SessionFilePaths struct {
 	Metadata    string `json:"metadata"`
-	Transcript  string `json:"transcript"`
-	ContentHash string `json:"content_hash"`
+	Transcript  string `json:"transcript,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
 	Prompt      string `json:"prompt"`
 }
 

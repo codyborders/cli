@@ -2361,6 +2361,26 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 			Agent:        state.AgentType,
 		}
 
+		// Generate compact transcript for v2 /main
+		if v2Store != nil && len(fullTranscript) > 0 {
+			finalAg, _ := agent.GetByAgentType(state.AgentType) //nolint:errcheck // ag may be nil for unknown agent types; compactTranscriptForV2 handles nil
+			startLine := 0
+			if content, readErr := store.ReadSessionContentByID(ctx, cpID, state.SessionID); readErr == nil && content != nil {
+				startLine = content.Metadata.GetTranscriptStart()
+			} else {
+				errMsg := "unknown"
+				if readErr != nil {
+					errMsg = readErr.Error()
+				}
+				logging.Debug(logCtx, "finalize: failed to read checkpoint metadata, using full transcript for compact output",
+					slog.String("checkpoint_id", cpIDStr),
+					slog.String("session_id", state.SessionID),
+					slog.String("error", errMsg),
+				)
+			}
+			updateOpts.CompactTranscript = compactTranscriptForV2(logCtx, finalAg, fullTranscript, startLine)
+		}
+
 		updateErr := store.UpdateCommitted(ctx, updateOpts)
 		if updateErr != nil {
 			logging.Warn(logCtx, "finalize: failed to update checkpoint",
