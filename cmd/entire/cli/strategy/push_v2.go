@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -48,8 +47,7 @@ func tryPushRef(ctx context.Context, target string, refName plumbing.ReferenceNa
 
 	// Use --no-verify to prevent recursive hook calls (this runs inside pre-push)
 	refSpec := fmt.Sprintf("%s:%s", refName, refName)
-	cmd := exec.CommandContext(ctx, "git", "push", "--no-verify", target, refSpec)
-	cmd.Stdin = nil // Disconnect stdin to prevent hanging in hook context
+	cmd := CheckpointGitCommand(ctx, target, "push", "--no-verify", target, refSpec)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -119,9 +117,8 @@ func fetchAndMergeRef(ctx context.Context, target string, refName plumbing.Refer
 	tmpRefName := plumbing.ReferenceName("refs/entire-fetch-tmp/" + tmpRefSuffix)
 	refSpec := fmt.Sprintf("+%s:%s", refName, tmpRefName)
 
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", target, refSpec)
-	fetchCmd.Stdin = nil
-	fetchCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	fetchCmd := CheckpointGitCommand(ctx, target, "fetch", target, refSpec)
+	fetchCmd.Env = append(fetchCmd.Env, "GIT_TERMINAL_PROMPT=0")
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch failed: %s", output)
 	}
@@ -203,9 +200,8 @@ func detectRemoteOnlyArchives(ctx context.Context, target string, repo *git.Repo
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", target, paths.V2FullRefPrefix+"*")
-	cmd.Stdin = nil
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd := CheckpointGitCommand(ctx, target, "ls-remote", target, paths.V2FullRefPrefix+"*")
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ls-remote failed: %w", err)
@@ -248,9 +244,8 @@ func handleRotationConflict(ctx context.Context, target string, repo *git.Reposi
 	// Fetch the latest archived generation
 	archiveTmpRef := plumbing.ReferenceName("refs/entire-fetch-tmp/archive-" + latestArchive)
 	archiveRefSpec := fmt.Sprintf("+%s:%s", archiveRefName, archiveTmpRef)
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", target, archiveRefSpec)
-	fetchCmd.Stdin = nil
-	fetchCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	fetchCmd := CheckpointGitCommand(ctx, target, "fetch", target, archiveRefSpec)
+	fetchCmd.Env = append(fetchCmd.Env, "GIT_TERMINAL_PROMPT=0")
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		return fmt.Errorf("fetch archived generation failed: %s", output)
 	}
