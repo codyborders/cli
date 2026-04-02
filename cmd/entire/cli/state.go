@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -290,89 +291,47 @@ func DetectFileChanges(ctx context.Context, previouslyUntracked []string) (*File
 // (already condensed by PostCommit) back to FilesTouched via SaveStep. Files not in
 // HEAD or with different content in the working tree are kept. Fails open: if any git
 // operation errors, returns the original list unchanged.
-func filterToUncommittedFiles(ctx context.Context, files []string, repoRoot string) []string {
+//
+// Uses git CLI instead of go-git because go-git's content comparison doesn't
+// handle line-ending normalization (core.autocrlf) correctly on Windows,
+// causing committed files to appear as modified. See HardResetWithProtection
+// and HasUncommittedChanges for similar go-git workarounds.
+func filterToUncommittedFiles(ctx context.Context, files []string, _ string) []string {
 	logCtx := logging.WithComponent(ctx, "filter-uncommitted")
 
 	if len(files) == 0 {
 		return files
 	}
 
-	repo, err := openRepository(ctx)
+	// Use git status to find which candidate files have uncommitted changes.
+	// Files that are clean (committed with matching content) won't appear in
+	// the output and should be filtered out.
+	args := []string{"status", "--porcelain", "-z", "--"}
+	args = append(args, files...)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	output, err := cmd.Output()
 	if err != nil {
-		logging.Debug(logCtx, "openRepository failed, returning all files",
+		logging.Debug(logCtx, "git status failed, returning all files",
 			slog.String("error", err.Error()))
 		return files // fail open
 	}
 
-	head, err := repo.Head()
-	if err != nil {
-		logging.Debug(logCtx, "repo.Head() failed, returning all files",
-			slog.String("error", err.Error()))
-		return files // fail open (empty repo, detached HEAD, etc.)
+	// Parse NUL-delimited output. Each entry is "XY path\0" where XY is the
+	// two-character status code. Files that are clean don't appear at all.
+	dirtyFiles := make(map[string]bool)
+	for _, entry := range strings.Split(string(output), "\x00") {
+		if len(entry) < 4 {
+			continue // skip empty entries and malformed lines
+		}
+		// Format: "XY <path>" — status is first 2 chars, space, then path
+		path := filepath.ToSlash(entry[3:])
+		dirtyFiles[path] = true
 	}
-
-	commit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		logging.Debug(logCtx, "repo.CommitObject failed, returning all files",
-			slog.String("error", err.Error()),
-			slog.String("head", head.Hash().String()))
-		return files // fail open
-	}
-
-	headTree, err := commit.Tree()
-	if err != nil {
-		logging.Debug(logCtx, "commit.Tree() failed, returning all files",
-			slog.String("error", err.Error()))
-		return files // fail open
-	}
-
-	logging.Debug(logCtx, "checking files against HEAD",
-		slog.String("head", head.Hash().String()[:7]),
-		slog.Int("candidates", len(files)))
 
 	var result []string
 	for _, relPath := range files {
-		headFile, err := headTree.File(relPath)
-		if err != nil {
-			// File not in HEAD — it's uncommitted
-			logging.Debug(logCtx, "file not in HEAD tree, keeping",
-				slog.String("file", relPath),
-				slog.String("error", err.Error()))
+		if dirtyFiles[relPath] {
 			result = append(result, relPath)
-			continue
-		}
-
-		// File is in HEAD — compare content with working tree
-		absPath := filepath.Join(repoRoot, relPath)
-		workingContent, err := os.ReadFile(absPath) //nolint:gosec // path from controlled source
-		if err != nil {
-			// Can't read working tree file (deleted?) — keep it
-			logging.Debug(logCtx, "cannot read working tree file, keeping",
-				slog.String("file", relPath),
-				slog.String("error", err.Error()))
-			result = append(result, relPath)
-			continue
-		}
-
-		headContent, err := headFile.Contents()
-		if err != nil {
-			logging.Debug(logCtx, "cannot read HEAD blob, keeping",
-				slog.String("file", relPath),
-				slog.String("error", err.Error()))
-			result = append(result, relPath)
-			continue
-		}
-
-		if string(workingContent) != headContent {
-			// Working tree differs from HEAD — uncommitted changes
-			logging.Debug(logCtx, "content differs from HEAD, keeping",
-				slog.String("file", relPath),
-				slog.Int("working_len", len(workingContent)),
-				slog.Int("head_len", len(headContent)))
-			result = append(result, relPath)
-		} else {
-			logging.Debug(logCtx, "content matches HEAD, filtering out",
-				slog.String("file", relPath))
 		}
 	}
 
