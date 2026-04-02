@@ -204,8 +204,7 @@ func (a *OpenCodeAgent) fetchAndCacheExport(ctx context.Context, sessionID strin
 		logging.Debug(logging.WithComponent(ctx, "lifecycle"),
 			"opencode export file contained invalid JSON",
 			slog.Int("bytes", len(data)),
-			slog.String("prefix", string(data[:min(len(data), 200)])),
-			slog.String("suffix", string(data[max(0, len(data)-200):])),
+			slog.String("path", tmpFile),
 		)
 		return "", fmt.Errorf("opencode export returned invalid JSON (%d bytes)", len(data))
 	}
