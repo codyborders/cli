@@ -274,7 +274,15 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		Summary:                     summary,
 	}
 
-	writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, sessionData.Transcript, state.CheckpointTranscriptStart)
+	redactedForCompact, compactRedactErr := redact.JSONLBytes(sessionData.Transcript)
+	if compactRedactErr != nil {
+		logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
+			slog.String("session_id", state.SessionID),
+			slog.String("error", compactRedactErr.Error()),
+		)
+		redactedForCompact = nil
+	}
+	writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
 
 	// Write checkpoint metadata to v1 branch
 	if err := store.WriteCommitted(ctx, writeOpts); err != nil {
@@ -926,8 +934,8 @@ func (s *ManualCommitStrategy) cleanupShadowBranchIfUnused(ctx context.Context, 
 }
 
 // compactTranscriptForV2 produces the Entire Transcript Format (transcript.jsonl)
-// from a raw agent transcript. Returns nil if compaction cannot be performed
-// (nil agent, empty transcript, redaction failure, or compaction error) —
+// from a redacted agent transcript. Returns nil if compaction cannot be performed
+// (nil agent, empty transcript, or compaction error) —
 // callers treat nil as "skip writing transcript.jsonl to /main".
 func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []byte, checkpointTranscriptStart int) []byte {
 	if ag == nil || len(transcript) == 0 {
@@ -937,16 +945,7 @@ func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []by
 		return nil
 	}
 
-	redactedTranscript, err := redact.JSONLBytes(transcript)
-	if err != nil {
-		logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
-			slog.String("agent", string(ag.Name())),
-			slog.String("error", err.Error()),
-		)
-		return nil
-	}
-
-	compacted, err := compact.Compact(redactedTranscript, compact.MetadataFields{
+	compacted, err := compact.Compact(transcript, compact.MetadataFields{
 		Agent:      string(ag.Name()),
 		CLIVersion: versioninfo.Version,
 		StartLine:  checkpointTranscriptStart,
