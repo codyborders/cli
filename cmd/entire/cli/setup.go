@@ -258,9 +258,6 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 		if err != nil {
 			return fmt.Errorf("agent selection cancelled: %w", err)
 		}
-		if len(selectedAgentNames) == 0 {
-			return errors.New("please select at least one agent")
-		}
 	} else {
 		form := NewAccessibleForm(
 			huh.NewGroup(
@@ -268,18 +265,32 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 					Title("Manage agents").
 					Description("Use space to select/deselect, enter to confirm.").
 					Options(options...).
-					Validate(func(selected []string) error {
-						if len(selected) == 0 {
-							return errors.New("please select at least one agent")
-						}
-						return nil
-					}).
 					Value(&selectedAgentNames),
 			),
 		)
 		if err := form.Run(); err != nil {
 			return fmt.Errorf("agent selection cancelled: %w", err)
 		}
+	}
+
+	// If user deselected all agents, remove them all and show guidance
+	if len(selectedAgentNames) == 0 {
+		for _, name := range installedNames {
+			ag, err := agent.Get(name)
+			if err != nil {
+				continue
+			}
+			hookAgent, ok := agent.AsHookSupport(ag)
+			if !ok {
+				continue
+			}
+			if err := hookAgent.UninstallHooks(ctx); err != nil {
+				return fmt.Errorf("failed to remove %s hooks: %w", ag.Type(), err)
+			}
+		}
+		fmt.Fprintln(w, "All agents have been removed.")
+		fmt.Fprintln(w, "To add agents again, run: entire configure --agent <name>")
+		return nil
 	}
 
 	return applyAgentChanges(ctx, w, selectedAgentNames, installedNames, installedSet, opts)
