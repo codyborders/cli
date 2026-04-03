@@ -1097,16 +1097,17 @@ func (s *ManualCommitStrategy) postCommitProcessSession(
 		// Clear filesystem prompt.txt only when ALL files are committed.
 		// If carry-forward files remain, the prompt must persist so the next
 		// condensation (triggered by the next commit) can read it.
-		if len(remainingFiles) == 0 {
+		if len(state.FilesTouched) == 0 {
 			clearFilesystemPrompt(ctx, state.SessionID)
 		}
 	}
 	carryForwardSpan.End()
 
-	// Mark ENDED sessions as fully condensed when no carry-forward remains.
-	// PostCommit will skip these sessions entirely on future commits.
-	// They persist only for LastCheckpointID (amend trailer restoration).
-	if handler.condensed && state.Phase == session.PhaseEnded && len(state.FilesTouched) == 0 {
+	// Mark ENDED sessions as fully condensed when there's nothing left to do.
+	// Either we just condensed (no carry-forward remains) or there was never any
+	// new content. PostCommit will skip these on future commits; they persist only
+	// for LastCheckpointID (amend trailer restoration).
+	if state.Phase == session.PhaseEnded && len(state.FilesTouched) == 0 && (handler.condensed || !hasNew) {
 		state.FullyCondensed = true
 	}
 
@@ -1295,12 +1296,10 @@ func (s *ManualCommitStrategy) filterSessionsWithNewContent(ctx context.Context,
 		}
 		hasNew, err := s.sessionHasNewContent(ctx, repo, state, contentCheckOpts{stagedFiles: stagedFiles})
 		if err != nil {
-			logging.Debug(logCtx, "filterSessionsWithNewContent: error checking session, including it (fail-open)",
+			logging.Debug(logCtx, "filterSessionsWithNewContent: error checking session, skipping it",
 				slog.String("session_id", state.SessionID),
 				slog.String("error", err.Error()),
 			)
-			// On error, include the session (fail open for hooks)
-			result = append(result, state)
 			continue
 		}
 		if !hasNew {
@@ -2359,6 +2358,26 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 			Transcript:   fullTranscript,
 			Prompts:      prompts,
 			Agent:        state.AgentType,
+		}
+
+		// Generate compact transcript for v2 /main
+		if v2Store != nil && len(fullTranscript) > 0 {
+			finalAg, _ := agent.GetByAgentType(state.AgentType) //nolint:errcheck // ag may be nil for unknown agent types; compactTranscriptForV2 handles nil
+			startLine := 0
+			if content, readErr := store.ReadSessionContentByID(ctx, cpID, state.SessionID); readErr == nil && content != nil {
+				startLine = content.Metadata.GetTranscriptStart()
+			} else {
+				errMsg := "unknown"
+				if readErr != nil {
+					errMsg = readErr.Error()
+				}
+				logging.Debug(logCtx, "finalize: failed to read checkpoint metadata, using full transcript for compact output",
+					slog.String("checkpoint_id", cpIDStr),
+					slog.String("session_id", state.SessionID),
+					slog.String("error", errMsg),
+				)
+			}
+			updateOpts.CompactTranscript = compactTranscriptForV2(logCtx, finalAg, fullTranscript, startLine)
 		}
 
 		updateErr := store.UpdateCommitted(ctx, updateOpts)
