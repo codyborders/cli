@@ -335,44 +335,25 @@ func DeleteOrphanedCheckpoints(ctx context.Context, checkpointIDs []string) (del
 	return checkpointIDs, []string{}, nil
 }
 
-// ListAllCleanupItems returns all orphaned items across all categories.
-// It iterates over all registered strategies and calls ListOrphanedItems on those
-// that implement OrphanedItemsLister.
-// Returns an error if the repository cannot be opened.
-func ListAllCleanupItems(ctx context.Context) ([]CleanupItem, error) {
-	var items []CleanupItem
-	var firstErr error
-
-	strat := NewManualCommitStrategy()
-	stratItems, err := strat.ListOrphanedItems(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing orphaned items: %w", err)
-	}
-	items = append(items, stratItems...)
-	// Orphaned session states (strategy-agnostic)
-	states, err := ListOrphanedSessionStates(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	items = append(items, states...)
-
-	return items, firstErr
-}
-
-// ListAllItems returns all Entire items (not just orphaned) for full cleanup.
+// ListAllItems returns all Entire items for full cleanup.
 // This includes all shadow branches and all session states regardless of
 // whether they have checkpoints or active shadow branches.
 func ListAllItems(ctx context.Context) ([]CleanupItem, error) {
 	var items []CleanupItem
 
-	// All shadow branches
-	strat := NewManualCommitStrategy()
-	stratItems, err := strat.ListOrphanedItems(ctx)
+	// All shadow branches (using ListShadowBranches directly, not
+	// ListOrphanedItems, so this won't break if orphan filtering is added)
+	branches, err := ListShadowBranches(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing shadow branches: %w", err)
 	}
-	items = append(items, stratItems...)
+	for _, branch := range branches {
+		items = append(items, CleanupItem{
+			Type:   CleanupTypeShadowBranch,
+			ID:     branch,
+			Reason: "clean all",
+		})
+	}
 
 	// All session states (not just orphaned)
 	store, err := session.NewStateStore(ctx)
