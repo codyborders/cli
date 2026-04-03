@@ -358,7 +358,8 @@ func writeActiveSessions(ctx context.Context, w io.Writer, sty statusStyles) {
 
 // isStuckActiveSession returns true if the session is in ACTIVE phase but has
 // not had any interaction for longer than the staleness threshold (defined in
-// doctor.go). This matches the same criteria doctor uses to flag stuck sessions.
+// doctor.go). Unlike doctor, this falls back to StartedAt when LastInteractionTime
+// is nil, so brand-new sessions are not falsely flagged as stale.
 //
 // Not to be confused with session.State.IsStale() which uses a 7-day TTL for
 // auto-cleanup of old session state files.
