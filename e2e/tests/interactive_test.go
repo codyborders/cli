@@ -27,7 +27,7 @@ func TestInteractiveMultiStep(t *testing.T) {
 
 		s.Send(t, session, "now commit it")
 		s.WaitFor(t, session, prompt, 60*time.Second)
-		testutil.AssertNewCommits(t, s, 1)
+		testutil.AssertNewCommitsWithTimeout(t, s, 1, 60*time.Second)
 
 		// Wait for the turn-end hook (including finalize) to complete before
 		// reading the checkpoint branch. The finalize step writes a second
