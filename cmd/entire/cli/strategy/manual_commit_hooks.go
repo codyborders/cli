@@ -2337,7 +2337,7 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 	// Evaluate v2 flag once before the loop to avoid re-reading settings per checkpoint
 	var v2Store *checkpoint.V2GitStore
 	if settings.IsCheckpointsV2Enabled(logCtx) {
-		v2Store = checkpoint.NewV2GitStore(repo, resolveV2FetchRemote(logCtx))
+		v2Store = checkpoint.NewV2GitStore(repo, ResolveCheckpointURL(logCtx, "origin"))
 	}
 
 	// Update each checkpoint with the full transcript
