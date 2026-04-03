@@ -334,7 +334,8 @@ func writeActiveSessions(ctx context.Context, w io.Writer, sty statusStyles) {
 
 			statsLine := strings.Join(stats, sty.render(sty.dim, " · "))
 			if isStuckActiveSession(st) {
-				fmt.Fprintf(w, "%s %s\n", sty.render(sty.dim, statsLine),
+				fmt.Fprintf(w, "%s %s %s\n", sty.render(sty.dim, statsLine),
+					sty.render(sty.dim, "·"),
 					sty.render(sty.yellow, "stale")+" (run 'entire doctor')")
 			} else {
 				fmt.Fprintln(w, sty.render(sty.dim, statsLine))
