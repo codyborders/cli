@@ -1181,6 +1181,184 @@ func TestWriteActiveSessions_StaleIndicator(t *testing.T) {
 	}
 }
 
+func TestIsStuckActiveSession(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	recent := now.Add(-5 * time.Minute)
+	stale := now.Add(-2 * time.Hour)
+	brandNew := now.Add(-10 * time.Second)
+
+	tests := []struct {
+		name  string
+		state *session.State
+		want  bool
+	}{
+		{
+			name:  "active with stale interaction",
+			state: &session.State{Phase: session.PhaseActive, LastInteractionTime: &stale},
+			want:  true,
+		},
+		{
+			name:  "active with nil interaction and old start",
+			state: &session.State{Phase: session.PhaseActive, LastInteractionTime: nil, StartedAt: now.Add(-2 * time.Hour)},
+			want:  true,
+		},
+		{
+			name:  "active with nil interaction and recent start",
+			state: &session.State{Phase: session.PhaseActive, LastInteractionTime: nil, StartedAt: brandNew},
+			want:  false,
+		},
+		{
+			name:  "active with recent interaction",
+			state: &session.State{Phase: session.PhaseActive, LastInteractionTime: &recent},
+			want:  false,
+		},
+		{
+			name:  "idle with stale interaction",
+			state: &session.State{Phase: session.PhaseIdle, LastInteractionTime: &stale},
+			want:  false,
+		},
+		{
+			name:  "ended with stale interaction",
+			state: &session.State{Phase: session.PhaseEnded, LastInteractionTime: &stale},
+			want:  false,
+		},
+		{
+			name:  "empty phase with stale interaction",
+			state: &session.State{Phase: "", LastInteractionTime: &stale},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isStuckActiveSession(tt.state); got != tt.want {
+				t.Errorf("isStuckActiveSession() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteActiveSessions_StaleWithNilInteractionOldStart(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+
+	states := []*session.State{
+		{
+			SessionID:           "old-nil-interaction-session",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-2 * time.Hour),
+			LastInteractionTime: nil,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "do something",
+			AgentType:           "Claude Code",
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if !strings.Contains(output, "stale") {
+		t.Errorf("Old session with nil LastInteractionTime should show stale indicator, got: %s", output)
+	}
+}
+
+func TestWriteActiveSessions_NotStaleWhenBrandNew(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+
+	states := []*session.State{
+		{
+			SessionID:           "brand-new-session",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-10 * time.Second),
+			LastInteractionTime: nil,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "hello",
+			AgentType:           "Claude Code",
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if strings.Contains(output, "stale") {
+		t.Errorf("Brand-new session should NOT show stale indicator, got: %s", output)
+	}
+}
+
+func TestWriteActiveSessions_NotStaleWhenRecent(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+	recentInteraction := now.Add(-5 * time.Minute)
+
+	states := []*session.State{
+		{
+			SessionID:           "fresh-session-1",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-30 * time.Minute),
+			LastInteractionTime: &recentInteraction,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "add feature",
+			AgentType:           "Claude Code",
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if strings.Contains(output, "stale") {
+		t.Errorf("Session with recent interaction should NOT show stale indicator, got: %s", output)
+	}
+}
+
 func TestFormatSettingsStatus_Separators(t *testing.T) {
 	t.Parallel()
 
