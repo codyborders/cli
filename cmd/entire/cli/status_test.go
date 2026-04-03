@@ -1062,6 +1062,91 @@ func TestRunStatus_DetailedShowsEnabledAgents(t *testing.T) {
 	}
 }
 
+func TestWriteActiveSessions_OmitsTokensWhenNoTokenData(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+	recentInteraction := now.Add(-5 * time.Minute)
+
+	states := []*session.State{
+		{
+			SessionID:           "no-token-session",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-30 * time.Minute),
+			LastInteractionTime: &recentInteraction,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "explain this code",
+			AgentType:           "Claude Code",
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if strings.Contains(output, "tokens") {
+		t.Errorf("Session with no token data should NOT show tokens, got: %s", output)
+	}
+}
+
+func TestWriteActiveSessions_ShowsTokensWithCheckpoints(t *testing.T) {
+	setupTestRepo(t)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+	recentInteraction := now.Add(-5 * time.Minute)
+
+	states := []*session.State{
+		{
+			SessionID:           "has-checkpoint-session",
+			WorktreePath:        "/Users/test/repo",
+			StartedAt:           now.Add(-30 * time.Minute),
+			LastInteractionTime: &recentInteraction,
+			Phase:               session.PhaseActive,
+			LastPrompt:          "fix the bug",
+			AgentType:           "Claude Code",
+			StepCount:           2,
+			TokenUsage: &agent.TokenUsage{
+				InputTokens:  800,
+				OutputTokens: 400,
+			},
+		},
+	}
+
+	for _, s := range states {
+		if err := store.Save(context.Background(), s); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	output := buf.String()
+
+	if !strings.Contains(output, "tokens 1.2k") {
+		t.Errorf("Session with checkpoints should show tokens, got: %s", output)
+	}
+}
+
 func TestRunStatus_DetailedDisabledDoesNotShowAgents(t *testing.T) {
 	setupTestRepo(t)
 	writeSettings(t, testSettingsDisabled)

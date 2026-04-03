@@ -267,11 +267,9 @@ func writeSessionCard(w io.Writer, s *strategy.SessionState, sty statusStyles) {
 	if s.LastInteractionTime != nil && s.LastInteractionTime.Sub(s.StartedAt) > time.Minute {
 		stats = append(stats, activeTimeDisplay(s.LastInteractionTime))
 	}
-	tokens := "0"
-	if s.TokenUsage != nil {
-		tokens = formatTokenCount(totalTokens(s.TokenUsage))
+	if t := totalTokens(s.TokenUsage); t > 0 {
+		stats = append(stats, "tokens "+formatTokenCount(t))
 	}
-	stats = append(stats, "tokens "+tokens)
 	statsLine := strings.Join(stats, sty.render(sty.dim, " · "))
 	fmt.Fprintln(w, sty.render(sty.dim, statsLine))
 	fmt.Fprintln(w)
