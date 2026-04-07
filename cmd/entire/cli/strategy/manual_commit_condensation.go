@@ -312,8 +312,6 @@ func generateSummary(ctx context.Context, sessionData *ExtractedSessionData, sta
 	return summary
 }
 
-// buildSessionMetrics creates a SessionMetrics from session state if any metrics are available.
-// Returns nil if no hook-provided metrics exist (e.g., for agents that don't report them).
 // marshalPromptAttributions encodes PromptAttributions to JSON for diagnostic persistence.
 // Returns nil if there are no attributions to persist.
 func marshalPromptAttributions(pas []PromptAttribution) json.RawMessage {
@@ -327,6 +325,8 @@ func marshalPromptAttributions(pas []PromptAttribution) json.RawMessage {
 	return data
 }
 
+// buildSessionMetrics creates a SessionMetrics from session state if any metrics are available.
+// Returns nil if no hook-provided metrics exist (e.g., for agents that don't report them).
 func buildSessionMetrics(state *SessionState) *cpkg.SessionMetrics {
 	if state.SessionDurationMs == 0 && state.SessionTurnCount == 0 && state.ContextTokens == 0 && state.ContextWindowSize == 0 {
 		return nil
