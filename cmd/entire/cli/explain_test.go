@@ -1108,8 +1108,7 @@ func TestRunExplainCheckpoint_V2PreferredGenerateWritesBothStores(t *testing.T) 
 		AuthorEmail:  "test@example.com",
 	}))
 
-	// generate=true, force=true — should succeed by writing through v1 store
-	// even though the resolved reader is V2GitStore.
+	// generate=true, force=true — should succeed by writing to both v1 and v2 stores.
 	var buf, errBuf bytes.Buffer
 	err = runExplainCheckpoint(ctx, &buf, &errBuf, "aabbcc", false, false, false, false, true, true, false)
 	// Generation requires an AI summarizer which isn't available in unit tests,

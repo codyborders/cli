@@ -317,7 +317,8 @@ func generateSummary(ctx context.Context, sessionData *ExtractedSessionData, sta
 // This must stay consistent with the slice used by calculateSessionAttributions so the
 // persisted diagnostics match the computed InitialAttribution.
 func marshalPromptAttributionsIncludingPending(state *SessionState) json.RawMessage {
-	pas := state.PromptAttributions
+	pas := make([]PromptAttribution, len(state.PromptAttributions), len(state.PromptAttributions)+1)
+	copy(pas, state.PromptAttributions)
 	if state.PendingPromptAttribution != nil {
 		pas = append(pas, *state.PendingPromptAttribution)
 	}
