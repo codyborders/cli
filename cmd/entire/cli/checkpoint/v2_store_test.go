@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -25,18 +24,12 @@ func initTestRepo(t *testing.T) *git.Repository {
 	t.Helper()
 	dir := t.TempDir()
 
-	repo, err := git.PlainInit(dir, false)
-	require.NoError(t, err)
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "README.md", "init")
+	testutil.GitAdd(t, dir, "README.md")
+	testutil.GitCommit(t, dir, "initial")
 
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0o644))
-	_, err = wt.Add("README.md")
-	require.NoError(t, err)
-	_, err = wt.Commit("initial", &git.CommitOptions{
-		Author: &object.Signature{Name: "Test", Email: "test@test.com"},
-	})
+	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 
 	return repo
