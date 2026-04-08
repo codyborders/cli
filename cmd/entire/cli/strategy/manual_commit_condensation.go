@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -249,6 +250,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 			redactedForCompact = nil
 		}
 		writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
+		writeOpts.CompactTranscriptStart = state.CompactTranscriptStart
 	}
 
 	// Write checkpoint metadata to v1 branch
@@ -258,14 +260,20 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 
 	writeCommittedV2IfEnabled(ctx, repo, writeOpts)
 
+	compactLines := 0
+	if writeOpts.CompactTranscript != nil {
+		compactLines = countCompactLines(writeOpts.CompactTranscript)
+	}
+
 	return &CondenseResult{
-		CheckpointID:         checkpointID,
-		SessionID:            state.SessionID,
-		CheckpointsCount:     state.StepCount,
-		FilesTouched:         sessionData.FilesTouched,
-		Prompts:              sessionData.Prompts,
-		TotalTranscriptLines: sessionData.FullTranscriptLines,
-		Transcript:           sessionData.Transcript,
+		CheckpointID:           checkpointID,
+		SessionID:              state.SessionID,
+		CheckpointsCount:       state.StepCount,
+		FilesTouched:           sessionData.FilesTouched,
+		Prompts:                sessionData.Prompts,
+		TotalTranscriptLines:   sessionData.FullTranscriptLines,
+		CompactTranscriptLines: compactLines,
+		Transcript:             sessionData.Transcript,
 	}, nil
 }
 
@@ -928,6 +936,7 @@ func (s *ManualCommitStrategy) CondenseSessionByID(ctx context.Context, sessionI
 	// Update session state: reset step count and transition to idle
 	state.StepCount = 0
 	state.CheckpointTranscriptStart = result.TotalTranscriptLines
+	state.CompactTranscriptStart += result.CompactTranscriptLines
 	state.CheckpointTranscriptSize = int64(len(result.Transcript))
 	state.Phase = session.PhaseIdle
 	state.LastCheckpointID = checkpointID
@@ -1036,6 +1045,7 @@ func (s *ManualCommitStrategy) CondenseAndMarkFullyCondensed(ctx context.Context
 	// Update state — keep Phase = ENDED (unlike CondenseSessionByID which sets IDLE)
 	state.StepCount = 0
 	state.CheckpointTranscriptStart = result.TotalTranscriptLines
+	state.CompactTranscriptStart += result.CompactTranscriptLines
 	state.LastCheckpointID = checkpointID
 	state.AttributionBaseCommit = state.BaseCommit
 	state.PromptAttributions = nil
@@ -1119,6 +1129,12 @@ func compactTranscriptForV2(ctx context.Context, ag agent.Agent, transcript []by
 		return nil
 	}
 	return compacted
+}
+
+// countCompactLines returns the number of lines in a compact transcript.
+// Each line is newline-terminated by compact.appendLine, so we count '\n' bytes.
+func countCompactLines(compactTranscript []byte) int {
+	return bytes.Count(compactTranscript, []byte{'\n'})
 }
 
 // writeCommittedV2IfEnabled writes checkpoint data to v2 refs when checkpoints_v2

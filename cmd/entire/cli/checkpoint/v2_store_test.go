@@ -379,6 +379,42 @@ func TestV2GitStore_WriteCommittedMain_NoCompactTranscript_SkipsGracefully(t *te
 	assert.Error(t, err, "transcript.jsonl should not exist when CompactTranscript is nil")
 }
 
+func TestV2GitStore_WriteCommittedMain_UsesCompactTranscriptStart(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo, "origin")
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("a1b2c3d4e5f7")
+	compactData := []byte("{\"v\":1,\"type\":\"user\",\"content\":\"hello\"}\n{\"v\":1,\"type\":\"assistant\",\"content\":\"hi\"}\n")
+
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+		CheckpointID:              cpID,
+		SessionID:                 "test-session-compact-start",
+		Strategy:                  "manual-commit",
+		Transcript:                []byte(`{"type":"human","message":"hello"}`),
+		CompactTranscript:         compactData,
+		Prompts:                   []string{"hello"},
+		AuthorName:                "Test",
+		AuthorEmail:               "test@test.com",
+		CheckpointTranscriptStart: 42, // full.jsonl offset (should NOT appear in v2 metadata)
+		CompactTranscriptStart:    15, // transcript.jsonl offset (should appear in v2 metadata)
+	})
+	require.NoError(t, err)
+
+	tree := v2MainTree(t, repo)
+	cpPath := cpID.Path()
+
+	// Read session metadata from /main
+	metadataContent := v2ReadFile(t, tree, cpPath+"/0/"+paths.MetadataFileName)
+	var metadata CommittedMetadata
+	require.NoError(t, json.Unmarshal([]byte(metadataContent), &metadata))
+
+	// checkpoint_transcript_start should be the compact offset (15), not the full.jsonl offset (42)
+	assert.Equal(t, 15, metadata.CheckpointTranscriptStart,
+		"v2 /main metadata should use CompactTranscriptStart for checkpoint_transcript_start")
+}
+
 func TestV2GitStore_UpdateCommitted_WritesCompactTranscript(t *testing.T) {
 	t.Parallel()
 	repo := initTestRepo(t)

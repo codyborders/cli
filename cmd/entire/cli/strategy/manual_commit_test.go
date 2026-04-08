@@ -4028,6 +4028,115 @@ func TestCondenseSession_V2DualWrite(t *testing.T) {
 	require.NoError(t, err, "full.jsonl should exist on /full/current")
 }
 
+// TestCondenseSession_V2CompactTranscriptStart verifies that the v2 /main metadata
+// uses the compact transcript.jsonl line offset (CompactTranscriptStart) for
+// checkpoint_transcript_start, not the full.jsonl line offset.
+func TestCondenseSession_V2CompactTranscriptStart(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+
+	worktree, err := repo.Worktree()
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644))
+	_, err = worktree.Add("main.go")
+	require.NoError(t, err)
+	commitHash, err := worktree.Commit("Initial commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "test@test.com", When: time.Now()},
+	})
+	require.NoError(t, err)
+
+	t.Chdir(dir)
+
+	// Enable checkpoints_v2 via settings
+	entireDir := filepath.Join(dir, ".entire")
+	require.NoError(t, os.MkdirAll(entireDir, 0o755))
+	settingsJSON := `{"enabled": true, "strategy": "manual-commit", "strategy_options": {"checkpoints_v2": true}}`
+	require.NoError(t, os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsJSON), 0o644))
+
+	s := &ManualCommitStrategy{}
+	sessionID := "2025-01-15-test-v2-compact-start"
+
+	// Create metadata directory with transcript
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	transcript := `{"type":"human","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":"hi there"}}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(metadataDirAbs, paths.TranscriptFileName), []byte(transcript), 0o644))
+
+	// SaveStep to create shadow branch
+	err = s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{"main.go"},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint 1",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.TranscriptPath = filepath.Join(metadataDirAbs, paths.TranscriptFileName)
+	state.BaseCommit = commitHash.String()[:7]
+	state.AgentType = agent.AgentTypeClaudeCode
+
+	// First condensation — CompactTranscriptStart should be 0
+	checkpointID := id.MustCheckpointID("cc11dd22ee33")
+	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify v2 /main metadata has checkpoint_transcript_start = 0 (first checkpoint)
+	v2MainRef, err := repo.Reference(plumbing.ReferenceName(paths.V2MainRefName), true)
+	require.NoError(t, err)
+	v2MainCommit, err := repo.CommitObject(v2MainRef.Hash())
+	require.NoError(t, err)
+	v2MainTree, err := v2MainCommit.Tree()
+	require.NoError(t, err)
+
+	cpPath := checkpointID.Path()
+	sessionTree, err := v2MainTree.Tree(cpPath + "/0")
+	require.NoError(t, err)
+	metadataFile, err := sessionTree.File(paths.MetadataFileName)
+	require.NoError(t, err)
+	metadataContent, err := metadataFile.Contents()
+	require.NoError(t, err)
+
+	var v2Metadata checkpoint.CommittedMetadata
+	require.NoError(t, json.Unmarshal([]byte(metadataContent), &v2Metadata))
+	require.Equal(t, 0, v2Metadata.CheckpointTranscriptStart,
+		"first checkpoint v2 metadata should have checkpoint_transcript_start=0")
+
+	// Read the v1 metadata for comparison
+	v1Ref, err := repo.Reference(plumbing.NewBranchReferenceName(paths.MetadataBranchName), true)
+	require.NoError(t, err)
+	v1Commit, err := repo.CommitObject(v1Ref.Hash())
+	require.NoError(t, err)
+	v1Tree, err := v1Commit.Tree()
+	require.NoError(t, err)
+	v1SessionTree, err := v1Tree.Tree(cpPath + "/0")
+	require.NoError(t, err)
+	v1MetadataFile, err := v1SessionTree.File(paths.MetadataFileName)
+	require.NoError(t, err)
+	v1MetadataContent, err := v1MetadataFile.Contents()
+	require.NoError(t, err)
+
+	var v1Metadata checkpoint.CommittedMetadata
+	require.NoError(t, json.Unmarshal([]byte(v1MetadataContent), &v1Metadata))
+	require.Equal(t, 0, v1Metadata.CheckpointTranscriptStart,
+		"first checkpoint v1 metadata should also have checkpoint_transcript_start=0")
+
+	// Verify compact transcript lines were counted in the result
+	require.Positive(t, result.CompactTranscriptLines,
+		"CondenseResult should report compact transcript lines")
+}
+
 // TestCondenseSession_V2Disabled_NoV2Refs verifies that when checkpoints_v2 is
 // not enabled, CondenseSession only writes to v1 and does not create v2 refs.
 func TestCondenseSession_V2Disabled_NoV2Refs(t *testing.T) {

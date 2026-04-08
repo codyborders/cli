@@ -273,6 +273,12 @@ type WriteCommittedOptions struct {
 	// CheckpointTranscriptStart is written to both CommittedMetadata.CheckpointTranscriptStart
 	// and the deprecated CommittedMetadata.TranscriptLinesAtStart for backward compatibility.
 
+	// CompactTranscriptStart is the transcript.jsonl line offset at start of this
+	// checkpoint's data. Used by v2 /main where checkpoint_transcript_start in metadata
+	// should correspond to the compact transcript (transcript.jsonl) rather than the
+	// raw transcript (full.jsonl). V1 continues using CheckpointTranscriptStart.
+	CompactTranscriptStart int
+
 	// TokenUsage contains the token usage for this checkpoint
 	TokenUsage *agent.TokenUsage
 
