@@ -2175,7 +2175,7 @@ func TestScopeTranscriptForCheckpoint_ZeroLinesReturnsAll(t *testing.T) {
 	}
 }
 
-func TestScopeTranscriptForCheckpoint_CodexUsesResponseItemOffsets(t *testing.T) {
+func TestScopeTranscriptForCheckpoint_CodexUsesStoredLineOffsets(t *testing.T) {
 	t.Parallel()
 
 	fullTranscript := []byte(`{"timestamp":"t1","type":"session_meta","payload":{"id":"s1"}}
@@ -2183,11 +2183,12 @@ func TestScopeTranscriptForCheckpoint_CodexUsesResponseItemOffsets(t *testing.T)
 {"timestamp":"t3","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md\ninstructions"}]}}
 {"timestamp":"t4","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first prompt"}]}}
 {"timestamp":"t5","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"response to first"}]}}
-{"timestamp":"t6","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second prompt"}]}}
-{"timestamp":"t7","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"response to second"}]}}
+{"timestamp":"t6","type":"event_msg","payload":{"type":"token_count","input_tokens":10,"output_tokens":1}}
+{"timestamp":"t7","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second prompt"}]}}
+{"timestamp":"t8","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"response to second"}]}}
 `)
 
-	scoped := scopeTranscriptForCheckpoint(fullTranscript, 4, agent.AgentTypeCodex)
+	scoped := scopeTranscriptForCheckpoint(fullTranscript, 6, agent.AgentTypeCodex)
 	entries, err := summarize.BuildCondensedTranscriptFromBytes(scoped, agent.AgentTypeCodex)
 	if err != nil {
 		t.Fatalf("failed to build condensed transcript: %v", err)

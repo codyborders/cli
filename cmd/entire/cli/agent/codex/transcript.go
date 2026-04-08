@@ -303,34 +303,6 @@ func (c *CodexAgent) ExtractPrompts(sessionRef string, fromOffset int) ([]string
 	return prompts, nil
 }
 
-// SliceFromResponseItem returns the transcript content after skipping n response_item
-// entries. Non-response_item lines are preserved in the returned suffix.
-func SliceFromResponseItem(data []byte, n int) ([]byte, error) {
-	if len(data) == 0 || n <= 0 {
-		return data, nil
-	}
-
-	lines := splitJSONL(data)
-	seen := 0
-	for i, lineData := range lines {
-		var line rolloutLine
-		if err := json.Unmarshal(lineData, &line); err != nil {
-			continue
-		}
-		if line.Type == "response_item" {
-			seen++
-		}
-		if seen >= n {
-			if i+1 >= len(lines) {
-				return nil, nil
-			}
-			return bytes.Join(lines[i+1:], []byte("\n")), nil
-		}
-	}
-
-	return nil, nil
-}
-
 // splitJSONL splits JSONL bytes into individual lines, skipping empty lines.
 func splitJSONL(data []byte) [][]byte {
 	var lines [][]byte

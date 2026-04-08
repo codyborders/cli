@@ -14,6 +14,7 @@ import (
 
 const (
 	transcriptTypeMessage       = "message"
+	codexTypeResponseItem       = "response_item"
 	codexTypeFunctionCall       = "function_call"
 	codexTypeFunctionCallOutput = "function_call_output"
 )
@@ -34,7 +35,7 @@ func isCodexFormat(content []byte) bool {
 			continue
 		}
 		switch probe.Type {
-		case "session_meta", "response_item", "event_msg", "turn_context":
+		case "session_meta", codexTypeResponseItem, "event_msg", "turn_context":
 			return true
 		default:
 			return false
@@ -341,7 +342,7 @@ func codexSliceFromResponseItem(lines []codexLine, n int) []codexLine {
 
 	seen := 0
 	for i, line := range lines {
-		if line.Type == "response_item" {
+		if line.Type == codexTypeResponseItem {
 			seen++
 		}
 		if seen >= n {

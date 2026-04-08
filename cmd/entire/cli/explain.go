@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
-	"github.com/entireio/cli/cmd/entire/cli/agent/codex"
 	"github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
 	"github.com/entireio/cli/cmd/entire/cli/agent/opencode"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
@@ -574,11 +573,7 @@ func scopeTranscriptForCheckpoint(fullTranscript []byte, startOffset int, agentT
 		}
 		return scoped
 	case agent.AgentTypeCodex:
-		scoped, err := codex.SliceFromResponseItem(fullTranscript, startOffset)
-		if err != nil {
-			return nil
-		}
-		return scoped
+		return transcript.SliceFromLine(fullTranscript, startOffset)
 	case agent.AgentTypeClaudeCode, agent.AgentTypeCursor, agent.AgentTypeFactoryAIDroid, agent.AgentTypeUnknown:
 		return transcript.SliceFromLine(fullTranscript, startOffset)
 	}
