@@ -33,7 +33,12 @@ func isCodexFormat(content []byte) bool {
 		if json.Unmarshal(line, &probe) != nil {
 			continue
 		}
-		return probe.Type == "session_meta"
+		switch probe.Type {
+		case "session_meta", "response_item", "event_msg", "turn_context":
+			return true
+		default:
+			return false
+		}
 	}
 	if scanner.Err() != nil {
 		return false
