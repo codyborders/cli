@@ -2608,6 +2608,7 @@ func (s *ManualCommitStrategy) carryForwardToNewShadowBranch(
 	remainingFiles []string,
 ) {
 	logCtx := logging.WithComponent(ctx, "checkpoint")
+	start := time.Now()
 	store := checkpoint.NewGitStore(repo)
 
 	// Don't include metadata directory in carry-forward. The carry-forward branch
@@ -2635,6 +2636,7 @@ func (s *ManualCommitStrategy) carryForwardToNewShadowBranch(
 		return
 	}
 	carryForwardWriteSpan.End()
+	duration := time.Since(start)
 	if result.Skipped {
 		logging.Debug(logCtx, "post-commit: carry-forward skipped (no changes)",
 			slog.String("session_id", state.SessionID),
@@ -2661,6 +2663,11 @@ func (s *ManualCommitStrategy) carryForwardToNewShadowBranch(
 
 	logging.Info(logCtx, "post-commit: carried forward remaining files",
 		slog.String("session_id", state.SessionID),
+		slog.Int("remaining_files", len(remainingFiles)),
+	)
+	logging.Info(logCtx, "carry-forward timings",
+		slog.String("session_id", state.SessionID),
+		slog.Int64("write_carry_forward_shadow_ms", duration.Milliseconds()),
 		slog.Int("remaining_files", len(remainingFiles)),
 	)
 }

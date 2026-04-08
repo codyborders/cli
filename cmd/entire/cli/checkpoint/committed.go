@@ -628,6 +628,7 @@ func aggregateTokenUsage(a, b *agent.TokenUsage) *agent.TokenUsage {
 // writeTranscript writes the transcript file from in-memory content or file path.
 // If the transcript exceeds MaxChunkSize, it's split into multiple chunk files.
 func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptions, basePath string, entries map[string]object.TreeEntry) error {
+	logCtx := logging.WithComponent(ctx, "checkpoint")
 	transcript := opts.Transcript
 	if len(transcript) == 0 && opts.TranscriptPath != "" {
 		var readErr error
@@ -646,6 +647,7 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 	}
 
 	// Redact secrets before chunking so content hash reflects redacted content
+	redactStart := time.Now()
 	redactCtx, redactTranscriptSpan := perf.Start(ctx, "redact_transcript")
 	transcript, err := redact.JSONLBytes(transcript)
 	if err != nil {
@@ -654,8 +656,10 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		return fmt.Errorf("failed to redact transcript secrets: %w", err)
 	}
 	redactTranscriptSpan.End()
+	redactDuration := time.Since(redactStart)
 
 	// Chunk the transcript if it's too large
+	chunkStart := time.Now()
 	chunkCtx, chunkTranscriptSpan := perf.Start(redactCtx, "chunk_transcript")
 	chunks, err := agent.ChunkTranscript(chunkCtx, transcript, opts.Agent)
 	if err != nil {
@@ -664,8 +668,10 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		return fmt.Errorf("failed to chunk transcript: %w", err)
 	}
 	chunkTranscriptSpan.End()
+	chunkDuration := time.Since(chunkStart)
 
 	// Write chunk files
+	blobStart := time.Now()
 	blobCtx, writeTranscriptBlobsSpan := perf.Start(chunkCtx, "write_transcript_blobs")
 	for i, chunk := range chunks {
 		chunkPath := basePath + agent.ChunkFileName(paths.TranscriptFileName, i)
@@ -682,8 +688,10 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		}
 	}
 	writeTranscriptBlobsSpan.End()
+	blobDuration := time.Since(blobStart)
 
 	// Content hash for deduplication (hash of full transcript)
+	contentHashStart := time.Now()
 	_, contentHashSpan := perf.Start(blobCtx, "write_transcript_content_hash")
 	contentHash := fmt.Sprintf("sha256:%x", sha256.Sum256(transcript))
 	hashBlob, err := CreateBlobFromContent(s.repo, []byte(contentHash))
@@ -698,6 +706,18 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 		Hash: hashBlob,
 	}
 	contentHashSpan.End()
+
+	logging.Info(logCtx, "write transcript timings",
+		slog.String("session_id", opts.SessionID),
+		slog.String("checkpoint_id", opts.CheckpointID.String()),
+		slog.String("agent", string(opts.Agent)),
+		slog.Int64("redact_transcript_ms", redactDuration.Milliseconds()),
+		slog.Int64("chunk_transcript_ms", chunkDuration.Milliseconds()),
+		slog.Int64("write_transcript_blobs_ms", blobDuration.Milliseconds()),
+		slog.Int64("write_transcript_content_hash_ms", time.Since(contentHashStart).Milliseconds()),
+		slog.Int("transcript_bytes", len(transcript)),
+		slog.Int("chunk_count", len(chunks)),
+	)
 	return nil
 }
 

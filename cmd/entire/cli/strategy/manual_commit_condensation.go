@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid"
@@ -114,6 +115,8 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	logCtx := logging.WithComponent(ctx, "checkpoint")
+	condenseStart := time.Now()
 
 	// Get shadow branch — use pre-resolved ref if available, otherwise resolve from repo.
 	shadowBranchName := getShadowBranchNameForCommit(state.BaseCommit, state.WorktreeID)
@@ -134,6 +137,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 	resolveTranscriptPath(state) //nolint:errcheck,gosec // best-effort; downstream readers handle missing files
 
 	var sessionData *ExtractedSessionData
+	extractStart := time.Now()
 	_, extractSessionDataSpan := perf.Start(ctx, "extract_session_data")
 	if hasShadowBranch {
 		var extractErr error
@@ -161,6 +165,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		}
 	}
 	extractSessionDataSpan.End()
+	extractDuration := time.Since(extractStart)
 
 	// Backfill session state token usage from the freshly-extracted transcript.
 	// Copilot CLI writes session.shutdown after the hooks return, so by condensation
@@ -208,6 +213,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		attrBase = state.BaseCommit
 	}
 
+	attributionStart := time.Now()
 	attrCtx, attributionSpan := perf.Start(ctx, "calculate_session_attribution")
 	attribution := calculateSessionAttributions(attrCtx, repo, ref, sessionData, state, attributionOpts{
 		headTree:              o.headTree,
@@ -219,6 +225,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		allAgentFiles:         o.allAgentFiles,
 	})
 	attributionSpan.End()
+	attributionDuration := time.Since(attributionStart)
 
 	// Get current branch name
 	branchName := GetCurrentBranchName(repo)
@@ -253,19 +260,7 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		Summary:                     summary,
 	}
 
-<<<<<<< HEAD
-	if settings.IsCheckpointsV2Enabled(ctx) {
-		redactedForCompact, compactRedactErr := redact.JSONLBytes(sessionData.Transcript)
-		if compactRedactErr != nil {
-			logging.Warn(ctx, "compact transcript redaction failed, skipping transcript.jsonl on /main",
-				slog.String("session_id", state.SessionID),
-				slog.String("error", compactRedactErr.Error()),
-			)
-			redactedForCompact = nil
-		}
-		writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
-	}
-=======
+	compactRedactStart := time.Now()
 	compactCtx, compactRedactSpan := perf.Start(ctx, "redact_transcript_for_compact")
 	redactedForCompact, compactRedactErr := redact.JSONLBytes(sessionData.Transcript)
 	if compactRedactErr != nil {
@@ -277,12 +272,15 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		redactedForCompact = nil
 	}
 	compactRedactSpan.End()
+	compactRedactDuration := time.Since(compactRedactStart)
+	compactTranscriptStart := time.Now()
 	compactCtx, compactTranscriptSpan := perf.Start(compactCtx, "compact_transcript_v2")
 	writeOpts.CompactTranscript = compactTranscriptForV2(compactCtx, ag, redactedForCompact, state.CheckpointTranscriptStart)
 	compactTranscriptSpan.End()
->>>>>>> 27d52626d (remove high entropy contents from codex logs on store, are removed on restore anyhow)
+	compactTranscriptDuration := time.Since(compactTranscriptStart)
 
 	// Write checkpoint metadata to v1 branch
+	writeV1Start := time.Now()
 	writeCtx, writeCommittedSpan := perf.Start(ctx, "write_committed_v1")
 	if err := store.WriteCommitted(writeCtx, writeOpts); err != nil {
 		writeCommittedSpan.RecordError(err)
@@ -290,10 +288,27 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		return nil, fmt.Errorf("failed to write checkpoint metadata: %w", err)
 	}
 	writeCommittedSpan.End()
+	writeV1Duration := time.Since(writeV1Start)
 
+	writeV2Start := time.Now()
 	writeV2Ctx, writeCommittedV2Span := perf.Start(ctx, "write_committed_v2")
 	writeCommittedV2IfEnabled(writeV2Ctx, repo, writeOpts)
 	writeCommittedV2Span.End()
+	writeV2Duration := time.Since(writeV2Start)
+
+	logging.Info(logCtx, "condense timings",
+		slog.String("session_id", state.SessionID),
+		slog.String("checkpoint_id", checkpointID.String()),
+		slog.Int64("extract_session_data_ms", extractDuration.Milliseconds()),
+		slog.Int64("calculate_session_attribution_ms", attributionDuration.Milliseconds()),
+		slog.Int64("redact_transcript_for_compact_ms", compactRedactDuration.Milliseconds()),
+		slog.Int64("compact_transcript_v2_ms", compactTranscriptDuration.Milliseconds()),
+		slog.Int64("write_committed_v1_ms", writeV1Duration.Milliseconds()),
+		slog.Int64("write_committed_v2_ms", writeV2Duration.Milliseconds()),
+		slog.Int64("total_ms", time.Since(condenseStart).Milliseconds()),
+		slog.Int("transcript_bytes", len(sessionData.Transcript)),
+		slog.Int("transcript_lines", sessionData.FullTranscriptLines),
+	)
 
 	return &CondenseResult{
 		CheckpointID:         checkpointID,
