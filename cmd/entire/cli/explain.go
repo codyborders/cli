@@ -484,7 +484,7 @@ func generateCheckpointSummary(ctx context.Context, w, _ io.Writer, v1Store *che
 	}
 
 	if v1Err != nil && v2Err != nil {
-		return fmt.Errorf("failed to save summary: v1: %w, v2: %v", v1Err, v2Err)
+		return fmt.Errorf("failed to save summary: v1: %w, v2: %w", v1Err, v2Err)
 	}
 	if v1Err != nil {
 		logging.Debug(ctx, "v1 UpdateSummary failed (v2 succeeded)",
