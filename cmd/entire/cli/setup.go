@@ -916,7 +916,8 @@ func setupAgentHooks(ctx context.Context, ag agent.Agent, localDev, forceHooks b
 // Returns the detected/selected agents and any error.
 //
 // On first run (no hooks installed):
-//   - Single detected agent: used automatically
+//   - Single detected built-in agent: used automatically
+//   - Single detected external agent: interactive multi-select prompt
 //   - Multiple/no detected agents: interactive multi-select prompt
 //
 // On re-run (hooks already installed):
