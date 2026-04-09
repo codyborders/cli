@@ -134,15 +134,27 @@ func TestReadOnlySession_NotCondensed(t *testing.T) {
 		}
 	}
 
-	// The read-only session should NOT have been condensed — verify its state
-	// is unchanged (StepCount should still be 0, not incremented by condensation)
+	// Verify the included session is the coding session, not the read-only one
+	env.AssertCheckpointContainsSession(t, summary, codingSess.ID)
+	env.AssertCheckpointExcludesSession(t, summary, readOnlySess.ID)
+
+	// The read-only session should NOT have been condensed — verify that none of
+	// the session fields updated by condensation changed.
 	roStateAfter, err := env.GetSessionState(readOnlySess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionState for read-only session after commit failed: %v", err)
 	}
-	if roStateAfter.StepCount != roState.StepCount {
-		t.Errorf("Read-only session StepCount changed from %d to %d — it was incorrectly condensed",
-			roState.StepCount, roStateAfter.StepCount)
+	if roStateAfter.LastCheckpointID != roState.LastCheckpointID {
+		t.Errorf("Read-only session LastCheckpointID changed from %q to %q — it was incorrectly condensed",
+			roState.LastCheckpointID, roStateAfter.LastCheckpointID)
+	}
+	if roStateAfter.FullyCondensed != roState.FullyCondensed {
+		t.Errorf("Read-only session FullyCondensed changed from %t to %t — it was incorrectly condensed",
+			roState.FullyCondensed, roStateAfter.FullyCondensed)
+	}
+	if roStateAfter.CheckpointTranscriptStart != roState.CheckpointTranscriptStart {
+		t.Errorf("Read-only session CheckpointTranscriptStart changed from %d to %d — it was incorrectly condensed",
+			roState.CheckpointTranscriptStart, roStateAfter.CheckpointTranscriptStart)
 	}
 }
 
@@ -248,11 +260,12 @@ func TestReadOnlySession_ActiveDuringCommit_NotCondensed(t *testing.T) {
 		}
 	}
 
-	// Verify the checkpoint doesn't falsely attribute committed files to the read-only session
-	for _, f := range summary.FilesTouched {
-		if f != "feature.go" {
-			t.Errorf("Unexpected file in checkpoint files_touched: %q", f)
-		}
+	// Verify the checkpoint records exactly the committed file from the coding session
+	if len(summary.FilesTouched) != 1 {
+		t.Fatalf("Checkpoint should contain exactly 1 touched file (feature.go), got %d: %v", len(summary.FilesTouched), summary.FilesTouched)
+	}
+	if summary.FilesTouched[0] != "feature.go" {
+		t.Errorf("Unexpected file in checkpoint files_touched: got %q, want %q", summary.FilesTouched[0], "feature.go")
 	}
 }
 
