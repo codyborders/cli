@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/entireio/cli/cmd/entire/cli/agent"
 )
 
 func TestClaudeGenerator_GitIsolation(t *testing.T) {
@@ -65,7 +67,7 @@ func TestStripGitEnv(t *testing.T) {
 		"SHELL=/bin/zsh",
 	}
 
-	filtered := stripGitEnv(env)
+	filtered := agent.StripGitEnv(env)
 
 	expected := []string{
 		"HOME=/Users/test",
