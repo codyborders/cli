@@ -62,63 +62,70 @@ func writeSettings(t *testing.T, content string) {
 func hideExternalAgentsFromPath(t *testing.T) {
 	t.Helper()
 
-	pathEnv := os.Getenv("PATH")
-	if pathEnv == "" {
-		return
+	pathDir := t.TempDir()
+	for _, name := range []string{"git", "sh"} {
+		if err := preserveToolOnPath(name, pathDir); err != nil {
+			t.Fatalf("preserve %s on PATH: %v", name, err)
+		}
 	}
 
-	t.Setenv("PATH", pathWithoutExternalAgents(pathEnv))
+	t.Setenv("PATH", pathDir)
 }
 
-func pathWithoutExternalAgents(pathEnv string) string {
-	filtered := make([]string, 0, len(filepath.SplitList(pathEnv)))
-	for _, dir := range filepath.SplitList(pathEnv) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			filtered = append(filtered, dir)
-			continue
-		}
-
-		hasExternalAgent := false
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), "entire-agent-") {
-				hasExternalAgent = true
-				break
-			}
-		}
-		if hasExternalAgent {
-			continue
-		}
-
-		filtered = append(filtered, dir)
+func TestSetupTestDir_HidesExternalAgentsButKeepsGitAvailable(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
 	}
 
-	return strings.Join(filtered, string(os.PathListSeparator))
+	sharedDir := t.TempDir()
+	if err := copyExecutable(gitPath, filepath.Join(sharedDir, "git")); err != nil {
+		t.Fatalf("copy git executable: %v", err)
+	}
+	writeExternalAgentBinary(t, sharedDir, "ext-shared-dir")
+	t.Setenv("PATH", sharedDir)
+
+	setupTestDir(t)
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Fatalf("expected git to remain available after test PATH isolation: %v", err)
+	}
+	if _, err := exec.LookPath("entire-agent-ext-shared-dir"); err == nil {
+		t.Fatal("expected external agent to be hidden from PATH")
+	}
 }
 
-func TestPathWithoutExternalAgents_PreservesDirWithGlobMetaCharacters(t *testing.T) {
-	t.Parallel()
-
-	keepDir := filepath.Join(t.TempDir(), "bin[")
-	if err := os.MkdirAll(keepDir, 0o755); err != nil {
-		t.Fatalf("mkdir keep dir: %v", err)
+func preserveToolOnPath(name, dstDir string) error {
+	src, err := exec.LookPath(name)
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil
+		}
+		return err
 	}
 
-	externalDir := t.TempDir()
-	writeExternalAgentBinary(t, externalDir, "ext-path-filter")
+	return copyExecutable(src, filepath.Join(dstDir, filepath.Base(src)))
+}
 
-	filtered := pathWithoutExternalAgents(strings.Join([]string{
-		keepDir,
-		externalDir,
-	}, string(os.PathListSeparator)))
+func copyExecutable(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
 
-	got := filepath.SplitList(filtered)
-	if !slices.Contains(got, keepDir) {
-		t.Fatalf("expected PATH to keep %q, got %v", keepDir, got)
+	if err := os.Symlink(src, dst); err == nil {
+		return nil
 	}
-	if slices.Contains(got, externalDir) {
-		t.Fatalf("expected PATH to remove %q, got %v", externalDir, got)
+	if err := os.Link(src, dst); err == nil {
+		return nil
 	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dst, data, info.Mode())
 }
 
 func writeExternalAgentBinary(t *testing.T, dir, name string) {

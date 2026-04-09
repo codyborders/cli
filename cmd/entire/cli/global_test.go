@@ -20,11 +20,6 @@ func TestMain(m *testing.M) {
 		panic(fmt.Errorf("failed to register config storers: %w", err))
 	}
 
-	pathEnv := os.Getenv("PATH")
-	if pathEnv != "" {
-		_ = os.Setenv("PATH", pathWithoutExternalAgents(pathEnv))
-	}
-
 	os.Exit(m.Run())
 }
 
