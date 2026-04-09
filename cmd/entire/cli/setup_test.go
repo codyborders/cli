@@ -1663,6 +1663,128 @@ func TestManageAgents_AddAndRemove(t *testing.T) {
 	}
 }
 
+func TestMaybePromptVercelDeploymentDisable_MergesExistingConfig(t *testing.T) {
+	setupTestRepo(t)
+
+	requireWriteFile := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	requireWriteFile("vercel.json", `{
+  "cleanUrls": true,
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  }
+}`)
+
+	var prompted bool
+	var buf bytes.Buffer
+	err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+		prompted = true
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("maybePromptVercelDeploymentDisable() error = %v", err)
+	}
+	if !prompted {
+		t.Fatal("expected Vercel prompt to run")
+	}
+
+	data, err := os.ReadFile("vercel.json")
+	if err != nil {
+		t.Fatalf("read vercel.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse vercel.json: %v", err)
+	}
+
+	if config["cleanUrls"] != true {
+		t.Fatalf("expected cleanUrls to be preserved, got %#v", config["cleanUrls"])
+	}
+
+	gitConfig, ok := config["git"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected git object, got %#v", config["git"])
+	}
+	deploymentEnabled, ok := gitConfig["deploymentEnabled"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected deploymentEnabled object, got %#v", gitConfig["deploymentEnabled"])
+	}
+	if deploymentEnabled["main"] != true {
+		t.Fatalf("expected existing main rule to be preserved, got %#v", deploymentEnabled["main"])
+	}
+	if deploymentEnabled[vercelBranchPattern] != false {
+		t.Fatalf("expected %s to be disabled, got %#v", vercelBranchPattern, deploymentEnabled[vercelBranchPattern])
+	}
+}
+
+func TestMaybePromptVercelDeploymentDisable_CreatesConfigWhenVercelDetected(t *testing.T) {
+	setupTestRepo(t)
+
+	if err := os.MkdirAll(".vercel", 0o755); err != nil {
+		t.Fatalf("mkdir .vercel: %v", err)
+	}
+
+	var buf bytes.Buffer
+	err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("maybePromptVercelDeploymentDisable() error = %v", err)
+	}
+
+	data, err := os.ReadFile("vercel.json")
+	if err != nil {
+		t.Fatalf("read vercel.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse vercel.json: %v", err)
+	}
+
+	if !vercelDeploymentDisabled(config) {
+		t.Fatalf("expected generated vercel.json to disable %s branches: %s", vercelBranchPattern, string(data))
+	}
+}
+
+func TestMaybePromptVercelDeploymentDisable_SkipsWhenAlreadyDisabled(t *testing.T) {
+	setupTestRepo(t)
+
+	if err := os.WriteFile("vercel.json", []byte(`{
+  "git": {
+    "deploymentEnabled": {
+      "entire/*": false
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write vercel.json: %v", err)
+	}
+
+	promptCalled := false
+	var buf bytes.Buffer
+	err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+		promptCalled = true
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("maybePromptVercelDeploymentDisable() error = %v", err)
+	}
+	if promptCalled {
+		t.Fatal("expected Vercel prompt to be skipped when already configured")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output when already configured, got %q", buf.String())
+	}
+}
+
 func TestConfigureCmd_RemoveFlag_StillWorks(t *testing.T) {
 	// Cannot use t.Parallel() because we use t.Chdir
 	setupTestRepo(t)
