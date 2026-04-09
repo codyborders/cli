@@ -1514,6 +1514,9 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, prompt
 	hasVercelJSON := false
 	if _, err := os.Stat(vercelJSONPath); err == nil {
 		hasVercelJSON = true
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(w, "Note: Skipping Vercel deployment update: could not check vercel.json: %v\n", err)
+		return nil
 	}
 
 	hasVercelProject := hasVercelJSON
@@ -1525,6 +1528,9 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, prompt
 			if _, err := os.Stat(path); err == nil {
 				hasVercelProject = true
 				break
+			} else if !os.IsNotExist(err) {
+				fmt.Fprintf(w, "Note: Skipping Vercel deployment update: could not check %s: %v\n", path, err)
+				return nil
 			}
 		}
 	}
@@ -1562,7 +1568,10 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, prompt
 		return nil
 	}
 
-	mergeVercelDeploymentDisabled(config)
+	if err := mergeVercelDeploymentDisabled(config); err != nil {
+		fmt.Fprintf(w, "Note: Skipping Vercel branch deployment update: %v\n", err)
+		return nil
+	}
 
 	output, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
