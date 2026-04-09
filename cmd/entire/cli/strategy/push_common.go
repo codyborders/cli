@@ -271,13 +271,16 @@ func getMergeBase(ctx context.Context, repoPath, hashA, hashB string) (plumbing.
 	return plumbing.NewHash(strings.TrimSpace(string(output))), nil
 }
 
-// collectCommitsSince returns commits reachable from tip but not from exclude,
-// ordered oldest-first in topological order.
+// collectCommitsSince returns non-merge commits reachable from tip but not from
+// exclude, ordered oldest-first in topological order.
 func collectCommitsSince(ctx context.Context, repo *git.Repository, repoPath string, tip, exclude plumbing.Hash) ([]*object.Commit, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "rev-list", "--reverse", "--topo-order", exclude.String()+".."+tip.String())
+	// cherryPickOnto computes each commit's delta against its first parent, so
+	// replaying merge commits would incorrectly re-apply changes that arrived via
+	// non-first-parent history. Limit the replay set to non-merge commits.
+	cmd := exec.CommandContext(ctx, "git", "rev-list", "--reverse", "--topo-order", "--no-merges", exclude.String()+".."+tip.String())
 	cmd.Dir = repoPath
 	output, err := cmd.Output()
 	if err != nil {
@@ -295,6 +298,9 @@ func collectCommitsSince(ctx context.Context, repo *git.Repository, repoPath str
 		commit, commitErr := repo.CommitObject(hash)
 		if commitErr != nil {
 			return nil, fmt.Errorf("failed to get commit %s: %w", hash, commitErr)
+		}
+		if len(commit.ParentHashes) > 1 {
+			continue
 		}
 		commits = append(commits, commit)
 	}

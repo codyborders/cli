@@ -494,11 +494,137 @@ func TestFetchAndRebase_MergeBaseOnSecondParent_DoesNotReplayAncestors(t *testin
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, checkpoint.FlattenTree(repo, tree, "", entries))
 
+	current := localRef.Hash()
+	for range 10 {
+		c, cErr := repo.CommitObject(current)
+		require.NoError(t, cErr)
+		assert.LessOrEqual(t, len(c.ParentHashes), 1, "replayed history should stay linear, commit %s has %d parents", c.Hash, len(c.ParentHashes))
+		if len(c.ParentHashes) == 0 {
+			break
+		}
+		current = c.ParentHashes[0]
+	}
+
 	assert.NotContains(t, entries, "aa/aaaaaaaaaa/metadata.json",
 		"rebasing should not replay ancestors older than the true merge-base")
 	assert.Contains(t, entries, "bb/bbbbbbbbbb/metadata.json", "local checkpoint should be preserved")
 	assert.Contains(t, entries, "cc/cccccccccc/metadata.json", "merged remote checkpoint should be preserved")
 	assert.Contains(t, entries, "dd/dddddddddd/metadata.json", "new remote checkpoint should be preserved")
+}
+
+// TestFetchAndRebase_DoesNotResurrectRemoteOnlyCheckpointFromMerge verifies that
+// replaying a local merge commit does not resurrect a checkpoint that only ever
+// existed on the remote side of that merge and was later deleted remotely.
+//
+// Not parallel: uses t.Chdir() (required for OpenRepository).
+func TestFetchAndRebase_DoesNotResurrectRemoteOnlyCheckpointFromMerge(t *testing.T) {
+	ctx := context.Background()
+	branchName := paths.MetadataBranchName
+
+	bareDir := t.TempDir()
+	setupDir := t.TempDir()
+	gitRun := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		cmd.Env = testutil.GitIsolatedEnv()
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v in %s failed: %s", args, dir, out)
+	}
+
+	gitRun(bareDir, "init", "--bare", "-b", "main")
+	gitRun(setupDir, "clone", bareDir, ".")
+	gitRun(setupDir, "config", "user.email", "test@test.com")
+	gitRun(setupDir, "config", "user.name", "Test User")
+	gitRun(setupDir, "config", "commit.gpgsign", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(setupDir, "README.md"), []byte("# Test"), 0o644))
+	gitRun(setupDir, "add", ".")
+	gitRun(setupDir, "commit", "-m", "init")
+	gitRun(setupDir, "push", "origin", "main")
+
+	gitRun(setupDir, "checkout", "--orphan", branchName)
+	gitRun(setupDir, "rm", "-rf", ".")
+	baseDir := filepath.Join(setupDir, "aa", "aaaaaaaaaa")
+	require.NoError(t, os.MkdirAll(baseDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "metadata.json"),
+		[]byte(`{"checkpoint_id":"aaaaaaaaaaaa"}`), 0o644))
+	gitRun(setupDir, "add", ".")
+	gitRun(setupDir, "commit", "-m", "Checkpoint: aaaaaaaaaaaa")
+	gitRun(setupDir, "push", "origin", branchName)
+	gitRun(setupDir, "checkout", "main")
+
+	cloneLocal := filepath.Join(t.TempDir(), "clone-local")
+	cloneRemote := filepath.Join(t.TempDir(), "clone-remote")
+	require.NoError(t, os.MkdirAll(cloneLocal, 0o755))
+	require.NoError(t, os.MkdirAll(cloneRemote, 0o755))
+
+	for _, dir := range []string{cloneLocal, cloneRemote} {
+		gitRun(dir, "clone", bareDir, ".")
+		gitRun(dir, "config", "user.email", "test@test.com")
+		gitRun(dir, "config", "user.name", "Test User")
+		gitRun(dir, "config", "commit.gpgsign", "false")
+		gitRun(dir, "branch", branchName, "origin/"+branchName)
+	}
+
+	// Local-only checkpoint B.
+	gitRun(cloneLocal, "checkout", branchName)
+	localDir := filepath.Join(cloneLocal, "bb", "bbbbbbbbbb")
+	require.NoError(t, os.MkdirAll(localDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "metadata.json"),
+		[]byte(`{"checkpoint_id":"bbbbbbbbbbbb"}`), 0o644))
+	gitRun(cloneLocal, "add", ".")
+	gitRun(cloneLocal, "commit", "-m", "Checkpoint: bbbbbbbbbbbb")
+
+	// Remote-only checkpoint E that will later be deleted remotely.
+	gitRun(cloneRemote, "checkout", branchName)
+	remoteOnlyDir := filepath.Join(cloneRemote, "ee", "eeeeeeeeee")
+	require.NoError(t, os.MkdirAll(remoteOnlyDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(remoteOnlyDir, "metadata.json"),
+		[]byte(`{"checkpoint_id":"eeeeeeeeeeee"}`), 0o644))
+	gitRun(cloneRemote, "add", ".")
+	gitRun(cloneRemote, "commit", "-m", "Checkpoint: eeeeeeeeeeee")
+	gitRun(cloneRemote, "push", "origin", branchName)
+
+	// Local old-style sync creates merge M that brings in remote-only checkpoint E.
+	gitRun(cloneLocal, "fetch", "origin", branchName)
+	gitRun(cloneLocal, "merge", "--no-ff", "--no-edit", "origin/"+branchName)
+
+	// Remote deletes E and adds D.
+	require.NoError(t, os.Remove(filepath.Join(cloneRemote, "ee", "eeeeeeeeee", "metadata.json")))
+	gitRun(cloneRemote, "add", "-A")
+	remoteDirD := filepath.Join(cloneRemote, "dd", "dddddddddd")
+	require.NoError(t, os.MkdirAll(remoteDirD, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(remoteDirD, "metadata.json"),
+		[]byte(`{"checkpoint_id":"dddddddddddd"}`), 0o644))
+	gitRun(cloneRemote, "add", ".")
+	gitRun(cloneRemote, "commit", "-m", "Checkpoint: dddddddddddd")
+	gitRun(cloneRemote, "push", "origin", branchName)
+	gitRun(cloneRemote, "checkout", "main")
+	gitRun(cloneLocal, "checkout", "main")
+
+	t.Chdir(cloneLocal)
+
+	err := fetchAndRebaseSessionsCommon(ctx, "origin", branchName)
+	require.NoError(t, err)
+
+	repo, err := git.PlainOpen(cloneLocal)
+	require.NoError(t, err)
+
+	localRef, err := repo.Reference(plumbing.NewBranchReferenceName(branchName), true)
+	require.NoError(t, err)
+
+	tipCommit, err := repo.CommitObject(localRef.Hash())
+	require.NoError(t, err)
+	tree, err := tipCommit.Tree()
+	require.NoError(t, err)
+
+	entries := make(map[string]object.TreeEntry)
+	require.NoError(t, checkpoint.FlattenTree(repo, tree, "", entries))
+
+	assert.Contains(t, entries, "bb/bbbbbbbbbb/metadata.json", "local checkpoint should be preserved")
+	assert.Contains(t, entries, "dd/dddddddddd/metadata.json", "new remote checkpoint should be preserved")
+	assert.NotContains(t, entries, "ee/eeeeeeeeee/metadata.json",
+		"replaying the local merge should not resurrect a remote-only checkpoint deleted later on the remote")
 }
 
 // TestFetchAndRebase_NonOriginRemote_ReconcilesFetchedRef verifies that
