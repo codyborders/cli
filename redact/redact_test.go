@@ -40,6 +40,9 @@ func TestJSONLBytes_NoSecrets(t *testing.T) {
 	if string(result.Bytes()) != string(input) {
 		t.Errorf("expected unchanged input, got %q", result.Bytes())
 	}
+	if &result.Bytes()[0] != &input[0] {
+		t.Error("expected same underlying slice when no redaction needed")
+	}
 }
 
 func TestJSONLBytes_WithSecret(t *testing.T) {
