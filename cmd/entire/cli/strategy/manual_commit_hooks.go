@@ -2409,17 +2409,24 @@ func (s *ManualCommitStrategy) HandleTurnEnd(ctx context.Context, state *Session
 	// continues writing to the transcript (tool results, token counts, task_complete).
 	// Without this fix, the next checkpoint's scoped transcript starts mid-turn,
 	// including a tail of already-condensed content.
-	if hadMidTurnCommits && state.TranscriptPath != "" {
-		if ag, agErr := agent.GetByAgentType(state.AgentType); agErr == nil {
-			if analyzer, ok := agent.AsTranscriptAnalyzer(ag); ok {
-				if pos, posErr := analyzer.GetTranscriptPosition(state.TranscriptPath); posErr == nil && pos > state.CheckpointTranscriptStart {
-					logging.Debug(logging.WithComponent(ctx, "hooks"),
-						"advancing CheckpointTranscriptStart to turn end after mid-turn commit",
-						slog.String("session_id", state.SessionID),
-						slog.Int("old_offset", state.CheckpointTranscriptStart),
-						slog.Int("new_offset", pos),
-					)
-					state.CheckpointTranscriptStart = pos
+	//
+	// Skip this when carry-forward is active. carryForwardToNewShadowBranch
+	// intentionally resets CheckpointTranscriptStart to 0 so the next checkpoint
+	// remains self-contained with the full transcript.
+	if hadMidTurnCommits && state.TranscriptPath != "" && len(state.FilesTouched) == 0 {
+		transcriptPath, resolveErr := resolveTranscriptPath(state)
+		if resolveErr == nil {
+			if ag, agErr := agent.GetByAgentType(state.AgentType); agErr == nil {
+				if analyzer, ok := agent.AsTranscriptAnalyzer(ag); ok {
+					if pos, posErr := analyzer.GetTranscriptPosition(transcriptPath); posErr == nil && pos > state.CheckpointTranscriptStart {
+						logging.Debug(logging.WithComponent(ctx, "hooks"),
+							"advancing CheckpointTranscriptStart to turn end after mid-turn commit",
+							slog.String("session_id", state.SessionID),
+							slog.Int("old_offset", state.CheckpointTranscriptStart),
+							slog.Int("new_offset", pos),
+						)
+						state.CheckpointTranscriptStart = pos
+					}
 				}
 			}
 		}

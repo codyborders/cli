@@ -156,10 +156,6 @@ func TestCheckpointTranscriptStart_AdvancesPastMidTurnCommit(t *testing.T) {
 		t.Fatalf("Failed to write partial transcript: %v", err)
 	}
 
-	// Record transcript length at commit time
-	transcriptLinesAtCommit := len(session.TranscriptBuilder.String())
-	_ = transcriptLinesAtCommit // for documentation
-
 	// Agent commits mid-turn (before Stop)
 	env.GitCommitWithShadowHooksAsAgent("Add feature", "feature.go")
 
