@@ -178,17 +178,18 @@ func Bytes(b []byte) []byte {
 	return []byte(redacted)
 }
 
-// JSONLBytes is a convenience wrapper around JSONLContent for []byte content.
-func JSONLBytes(b []byte) ([]byte, error) {
+// JSONLBytes redacts secrets in JSONL-formatted byte content and returns
+// the result as RedactedBytes, certifying the output has been through redaction.
+func JSONLBytes(b []byte) (RedactedBytes, error) {
 	s := string(b)
 	redacted, err := JSONLContent(s)
 	if err != nil {
 		return nil, err
 	}
 	if redacted == s {
-		return b, nil
+		return RedactedBytes(b), nil
 	}
-	return []byte(redacted), nil
+	return RedactedBytes(redacted), nil
 }
 
 // JSONLContent parses each line as JSON to determine which string values

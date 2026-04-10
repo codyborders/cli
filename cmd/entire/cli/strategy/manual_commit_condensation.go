@@ -246,9 +246,9 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 				slog.String("session_id", state.SessionID),
 				slog.String("error", compactRedactErr.Error()),
 			)
-			redactedForCompact = nil
+		} else {
+			writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact.Bytes(), state.CheckpointTranscriptStart)
 		}
-		writeOpts.CompactTranscript = compactTranscriptForV2(ctx, ag, redactedForCompact, state.CheckpointTranscriptStart)
 	}
 
 	// Write checkpoint metadata to v1 branch

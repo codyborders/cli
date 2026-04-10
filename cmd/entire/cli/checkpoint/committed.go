@@ -195,7 +195,7 @@ func (s *GitStore) writeIncrementalTaskCheckpoint(opts WriteCommittedOptions, ta
 		Type:      opts.IncrementalType,
 		ToolUseID: opts.ToolUseID,
 		Timestamp: time.Now().UTC(),
-		Data:      incData,
+		Data:      json.RawMessage(incData.Bytes()),
 	}
 	cpData, err := jsonutil.MarshalIndentWithNewline(checkpoint, "", "  ")
 	if err != nil {
@@ -252,9 +252,10 @@ func (s *GitStore) writeFinalTaskCheckpoint(ctx context.Context, opts WriteCommi
 					slog.String("path", opts.SubagentTranscriptPath),
 					slog.String("error", jsonlErr.Error()),
 				)
-				redacted = redact.Bytes(agentContent)
+				agentContent = redact.Bytes(agentContent)
+			} else {
+				agentContent = redacted.Bytes()
 			}
-			agentContent = redacted
 
 			agentBlobHash, agentBlobErr := CreateBlobFromContent(s.repo, agentContent)
 			if agentBlobErr == nil {
@@ -640,10 +641,11 @@ func (s *GitStore) writeTranscript(ctx context.Context, opts WriteCommittedOptio
 	}
 
 	// Redact secrets before chunking so content hash reflects redacted content
-	transcript, err := redact.JSONLBytes(transcript)
+	redacted, err := redact.JSONLBytes(transcript)
 	if err != nil {
 		return fmt.Errorf("failed to redact transcript secrets: %w", err)
 	}
+	transcript = redacted.Bytes()
 
 	// Chunk the transcript if it's too large
 	chunks, err := agent.ChunkTranscript(ctx, transcript, opts.Agent)
@@ -1270,11 +1272,11 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 	// Replace transcript (full replace, not append)
 	// Apply redaction as safety net (caller should redact, but we ensure it here)
 	if len(opts.Transcript) > 0 {
-		transcript, err := redact.JSONLBytes(opts.Transcript)
+		redacted, err := redact.JSONLBytes(opts.Transcript)
 		if err != nil {
 			return fmt.Errorf("failed to redact transcript secrets: %w", err)
 		}
-		if err := s.replaceTranscript(ctx, transcript, opts.Agent, sessionPath, entries); err != nil {
+		if err := s.replaceTranscript(ctx, redacted, opts.Agent, sessionPath, entries); err != nil {
 			return fmt.Errorf("failed to replace transcript: %w", err)
 		}
 	}
@@ -1317,7 +1319,7 @@ func (s *GitStore) UpdateCommitted(ctx context.Context, opts UpdateCommittedOpti
 
 // replaceTranscript writes the full transcript content, replacing any existing transcript.
 // Also removes any chunk files from a previous write and updates the content hash.
-func (s *GitStore) replaceTranscript(ctx context.Context, transcript []byte, agentType types.AgentType, sessionPath string, entries map[string]object.TreeEntry) error {
+func (s *GitStore) replaceTranscript(ctx context.Context, transcript redact.RedactedBytes, agentType types.AgentType, sessionPath string, entries map[string]object.TreeEntry) error {
 	// Remove existing transcript files (base + any chunks)
 	transcriptBase := sessionPath + paths.TranscriptFileName
 	for key := range entries {
@@ -1327,7 +1329,7 @@ func (s *GitStore) replaceTranscript(ctx context.Context, transcript []byte, age
 	}
 
 	// Chunk the transcript (matches writeTranscript behavior)
-	chunks, err := agent.ChunkTranscript(ctx, transcript, agentType)
+	chunks, err := agent.ChunkTranscript(ctx, transcript.Bytes(), agentType)
 	if err != nil {
 		return fmt.Errorf("failed to chunk transcript: %w", err)
 	}
@@ -1550,9 +1552,10 @@ func createRedactedBlobFromFile(repo *git.Repository, filePath, treePath string)
 	if strings.HasSuffix(treePath, ".jsonl") {
 		redacted, jsonlErr := redact.JSONLBytes(content)
 		if jsonlErr != nil {
-			redacted = redact.Bytes(content)
+			content = redact.Bytes(content)
+		} else {
+			content = redacted.Bytes()
 		}
-		content = redacted
 	} else {
 		content = redact.Bytes(content)
 	}

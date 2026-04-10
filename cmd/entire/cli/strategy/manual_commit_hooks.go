@@ -2478,15 +2478,16 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 	// Redact secrets before writing — matches WriteCommitted behavior.
 	// The live transcript on disk contains raw content; redaction must happen
 	// before anything is persisted to the metadata branch.
-	fullTranscript, err = redact.JSONLBytes(fullTranscript)
-	if err != nil {
+	redactedTranscript, redactErr := redact.JSONLBytes(fullTranscript)
+	if redactErr != nil {
 		logging.Warn(logCtx, "finalize: transcript redaction failed, skipping",
 			slog.String("session_id", state.SessionID),
-			slog.String("error", err.Error()),
+			slog.String("error", redactErr.Error()),
 		)
 		state.TurnCheckpointIDs = nil
 		return 1 // Count as error - all checkpoints will be skipped
 	}
+	fullTranscript = redactedTranscript.Bytes()
 	for i, p := range prompts {
 		prompts[i] = redact.String(p)
 	}

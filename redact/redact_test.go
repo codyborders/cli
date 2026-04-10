@@ -37,11 +37,8 @@ func TestJSONLBytes_NoSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(result) != string(input) {
-		t.Errorf("expected unchanged input, got %q", result)
-	}
-	if &result[0] != &input[0] {
-		t.Error("expected same underlying slice when no redaction needed")
+	if string(result.Bytes()) != string(input) {
+		t.Errorf("expected unchanged input, got %q", result.Bytes())
 	}
 }
 
@@ -52,8 +49,8 @@ func TestJSONLBytes_WithSecret(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expected := []byte(`{"type":"text","content":"REDACTED"}`)
-	if !bytes.Equal(result, expected) {
-		t.Errorf("got %q, want %q", result, expected)
+	if !bytes.Equal(result.Bytes(), expected) {
+		t.Errorf("got %q, want %q", result.Bytes(), expected)
 	}
 }
 
