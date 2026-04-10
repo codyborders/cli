@@ -95,13 +95,14 @@ func (a *openCodeAgent) RunPrompt(ctx context.Context, dir string, prompt string
 	args = append(args, prompt)
 
 	timeout := a.timeout
-	if cfg.PromptTimeout > 0 {
-		timeout = cfg.PromptTimeout
-	}
 	if envTimeout := os.Getenv("E2E_TIMEOUT"); envTimeout != "" {
 		if parsed, err := time.ParseDuration(envTimeout); err == nil {
 			timeout = parsed
 		}
+	}
+	// Per-prompt timeout is the most specific override.
+	if cfg.PromptTimeout > 0 {
+		timeout = cfg.PromptTimeout
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
