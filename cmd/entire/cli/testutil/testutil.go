@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,7 @@ func InitRepo(t *testing.T, repoDir string) {
 		cfg.Raw = config.New()
 	}
 	cfg.Raw.Section("commit").SetOption("gpgsign", "false")
+	cfg.Core.AutoCRLF = "true"
 
 	if err := repo.SetConfig(cfg); err != nil {
 		t.Fatalf("failed to set repo config: %v", err)
@@ -282,6 +284,24 @@ func SafeIDPrefix(id string) string {
 	return id
 }
 
+// gitEmptyConfigPath returns the path to an empty file suitable for use as
+// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM. We use an empty file instead of
+// os.DevNull because git on Windows cannot open NUL as a config file.
+var gitEmptyConfig string
+var gitEmptyConfigOnce sync.Once
+
+func gitEmptyConfigPath() string {
+	gitEmptyConfigOnce.Do(func() {
+		f, err := os.CreateTemp("", "git-empty-config-*")
+		if err != nil {
+			panic("create empty git config: " + err.Error())
+		}
+		_ = f.Close()
+		gitEmptyConfig = f.Name()
+	})
+	return gitEmptyConfig
+}
+
 // GitIsolatedEnv returns os.Environ() with git isolation variables set.
 // This prevents user/system git config (global gitignore, aliases, etc.) from
 // affecting test behavior. Use this for any exec.Command that runs git or the
@@ -301,7 +321,7 @@ func GitIsolatedEnv() []string {
 		filtered = append(filtered, e)
 	}
 	return append(filtered,
-		"GIT_CONFIG_GLOBAL=/dev/null", // Isolate from user's global git config (e.g. global gitignore)
-		"GIT_CONFIG_SYSTEM=/dev/null", // Isolate from system git config
+		"GIT_CONFIG_GLOBAL="+gitEmptyConfigPath(), // Isolate from user's global git config (e.g. global gitignore)
+		"GIT_CONFIG_SYSTEM="+gitEmptyConfigPath(), // Isolate from system git config
 	)
 }

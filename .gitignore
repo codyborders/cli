@@ -27,6 +27,7 @@ go.work.sum
 
 # env file
 .env
+.envrc
 
 .DS_Store
 
@@ -61,3 +62,5 @@ docs/plans
 docs/reviews
 docs/superpowers
 tmp/
+.tmp/
+.superpowers/

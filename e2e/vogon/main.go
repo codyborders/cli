@@ -47,6 +47,7 @@ func main() {
 	fireHook(dir, "session-start", map[string]string{
 		"session_id":      sessionID,
 		"transcript_path": transcriptPath,
+		"model":           "vogon-llm-42",
 	})
 
 	if prompt != "" {
@@ -76,6 +77,7 @@ func main() {
 	fireHook(dir, "session-end", map[string]string{
 		"session_id":      sessionID,
 		"transcript_path": transcriptPath,
+		"model":           "vogon-llm-42",
 	})
 }
 
@@ -84,6 +86,7 @@ func runTurn(dir, sessionID, transcriptPath, prompt string) {
 		"session_id":      sessionID,
 		"transcript_path": transcriptPath,
 		"prompt":          prompt,
+		"model":           "vogon-llm-42",
 	})
 
 	appendTranscript(transcriptPath, "user", prompt)
@@ -97,6 +100,7 @@ func runTurn(dir, sessionID, transcriptPath, prompt string) {
 	fireHook(dir, "stop", map[string]string{
 		"session_id":      sessionID,
 		"transcript_path": transcriptPath,
+		"model":           "vogon-llm-42",
 	})
 }
 
@@ -112,8 +116,8 @@ type action struct {
 const fileExt = `go|md|txt|js|ts|py|rb|rs|toml|yaml|json`
 
 var (
-	// "create a [single|new|...] [markdown|text] file [at|called] <path>"
-	createFileRe = regexp.MustCompile(`(?i)create\s+(?:a\s+)?(?:\w+\s+)*?(?:markdown\s+|text\s+)?file\s+(?:at\s+|called\s+)?([^\s,]+\.(?:` + fileExt + `))`)
+	// "create a [single|new|...] [markdown|text] file [exactly at|at|called] <path>"
+	createFileRe = regexp.MustCompile(`(?i)create\s+(?:a\s+)?(?:\w+\s+)*?(?:markdown\s+|text\s+)?file\s+(?:exactly\s+at\s+|at\s+|called\s+)?([^\s,]+\.(?:` + fileExt + `))`)
 	// "create N files: <path> about <topic>, <path> about <topic>"
 	createMultiRe = regexp.MustCompile(`(?i)create\s+(?:\w+\s+)*?(?:four|three|two|\d+)\s+(?:\w+\s+)*?(?:markdown\s+)?files?:?\s+(.+)`)
 	// "modify <path>"

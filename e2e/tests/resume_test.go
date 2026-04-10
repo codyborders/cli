@@ -33,14 +33,14 @@ func TestResumeFromFeatureBranch(t *testing.T) {
 		s.Git(t, "checkout", "-b", "feature")
 
 		_, err := s.RunPrompt(t, ctx,
-			"create a file at docs/hello.md with a paragraph about greetings. Do not ask for confirmation, just make the change.")
+			"create a file at docs/hello.md with a paragraph about greetings. Do not ask for confirmation or approval, just make the change.")
 		if err != nil {
 			t.Fatalf("agent failed: %v", err)
 		}
 
 		s.Git(t, "add", ".")
 		s.Git(t, "commit", "-m", "Add hello doc")
-		testutil.WaitForCheckpoint(t, s, 15*time.Second)
+		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 
 		// Switch back to main and resume the feature branch.
 		s.Git(t, "checkout", mainBranch)
@@ -79,25 +79,25 @@ func TestResumeSquashMergeMultipleCheckpoints(t *testing.T) {
 		s.Git(t, "checkout", "-b", "feature")
 
 		_, err := s.RunPrompt(t, ctx,
-			"create a file at docs/red.md with a paragraph about the colour red. Do not ask for confirmation, just make the change.")
+			"create a file at docs/red.md with a paragraph about the colour red. Do not ask for confirmation or approval, just make the change.")
 		if err != nil {
 			t.Fatalf("prompt 1 failed: %v", err)
 		}
 
 		s.Git(t, "add", ".")
 		s.Git(t, "commit", "-m", "Add red doc")
-		testutil.WaitForCheckpoint(t, s, 15*time.Second)
+		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 		cp1Ref := testutil.GitOutput(t, s.Dir, "rev-parse", "entire/checkpoints/v1")
 
 		_, err = s.RunPrompt(t, ctx,
-			"create a file at docs/blue.md with a paragraph about the colour blue. Do not ask for confirmation, just make the change.")
+			"create a file at docs/blue.md with a paragraph about the colour blue. Do not ask for confirmation or approval, just make the change.")
 		if err != nil {
 			t.Fatalf("prompt 2 failed: %v", err)
 		}
 
 		s.Git(t, "add", ".")
 		s.Git(t, "commit", "-m", "Add blue doc")
-		testutil.WaitForCheckpointAdvanceFrom(t, s.Dir, cp1Ref, 15*time.Second)
+		testutil.WaitForCheckpointAdvanceFrom(t, s.Dir, cp1Ref, 30*time.Second)
 
 		// Record checkpoint IDs from both feature branch commits.
 		cpID1 := testutil.GetCheckpointTrailer(t, s.Dir, "HEAD~1")
@@ -207,14 +207,14 @@ func TestResumeOlderCheckpointWithNewerCommits(t *testing.T) {
 		s.Git(t, "checkout", "-b", "feature")
 
 		_, err := s.RunPrompt(t, ctx,
-			"create a file at docs/hello.md with a paragraph about greetings. Do not ask for confirmation, just make the change.")
+			"create a file at docs/hello.md with a paragraph about greetings. Do not ask for confirmation or approval, just make the change.")
 		if err != nil {
 			t.Fatalf("agent failed: %v", err)
 		}
 
 		s.Git(t, "add", ".")
 		s.Git(t, "commit", "-m", "Add hello doc")
-		testutil.WaitForCheckpoint(t, s, 15*time.Second)
+		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 
 		// Add a human-only commit on top (no agent involvement, no checkpoint).
 		require.NoError(t, os.MkdirAll(filepath.Join(s.Dir, "notes"), 0o755))

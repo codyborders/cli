@@ -109,6 +109,23 @@ func (env *TestEnv) Cleanup() {
 	// No-op - temp dirs are cleaned up by t.TempDir()
 }
 
+// gitEmptyConfigPath returns the path to an empty file suitable for use as
+// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM. We use an empty file instead of
+// os.DevNull because git on Windows cannot open NUL as a config file.
+var gitEmptyConfig string
+
+func gitEmptyConfigPath() string {
+	if gitEmptyConfig == "" {
+		f, err := os.CreateTemp("", "git-empty-config-*")
+		if err != nil {
+			panic("create empty git config: " + err.Error())
+		}
+		f.Close()
+		gitEmptyConfig = f.Name()
+	}
+	return gitEmptyConfig
+}
+
 // cliEnv returns the environment variables for CLI execution.
 // Includes Claude, Gemini, and OpenCode project dirs so tests work for any agent.
 // Delegates to testutil.GitIsolatedEnv() for git config isolation.
@@ -854,6 +871,100 @@ func (env *TestEnv) ReadFileFromBranch(branchName, filePath string) (string, boo
 	return content, true
 }
 
+// ReadFileFromRef reads a file's content from a specific ref's tree.
+// Unlike ReadFileFromBranch, this takes a full ref name (e.g., "refs/entire/checkpoints/v2/main")
+// and does not prepend "refs/heads/".
+// Returns the content and true if found, empty string and false if not found.
+func (env *TestEnv) ReadFileFromRef(refName, filePath string) (string, bool) {
+	env.T.Helper()
+
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		env.T.Fatalf("failed to open git repo: %v", err)
+	}
+
+	ref, err := repo.Reference(plumbing.ReferenceName(refName), true)
+	if err != nil {
+		return "", false
+	}
+
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return "", false
+	}
+
+	tree, err := commit.Tree()
+	if err != nil {
+		return "", false
+	}
+
+	file, err := tree.File(filePath)
+	if err != nil {
+		return "", false
+	}
+
+	content, err := file.Contents()
+	if err != nil {
+		return "", false
+	}
+
+	return content, true
+}
+
+// AssertCheckpointContainsSession verifies that the checkpoint summary includes
+// a session with the given session ID by reading per-session metadata from the
+// metadata branch.
+func (env *TestEnv) AssertCheckpointContainsSession(t *testing.T, summary checkpoint.CheckpointSummary, sessionID string) {
+	t.Helper()
+	for _, s := range summary.Sessions {
+		if env.sessionMetadataMatchesID(s.Metadata, sessionID) {
+			return
+		}
+	}
+	t.Errorf("Checkpoint did not include session %q", sessionID)
+}
+
+// AssertCheckpointExcludesSession verifies that the checkpoint summary does NOT
+// include a session with the given session ID.
+func (env *TestEnv) AssertCheckpointExcludesSession(t *testing.T, summary checkpoint.CheckpointSummary, sessionID string) {
+	t.Helper()
+	for _, s := range summary.Sessions {
+		if env.sessionMetadataMatchesID(s.Metadata, sessionID) {
+			t.Errorf("Checkpoint incorrectly included session %q", sessionID)
+			return
+		}
+	}
+}
+
+// sessionMetadataMatchesID reads session metadata from the metadata branch and
+// checks if it belongs to the given session ID.
+func (env *TestEnv) sessionMetadataMatchesID(metadataPath, sessionID string) bool {
+	// Strip leading slash — git tree paths are relative
+	cleanPath := strings.TrimPrefix(metadataPath, "/")
+	content, found := env.ReadFileFromBranch(paths.MetadataBranchName, cleanPath)
+	if !found {
+		return false
+	}
+	var meta checkpoint.CommittedMetadata
+	if err := json.Unmarshal([]byte(content), &meta); err != nil {
+		return false
+	}
+	return meta.SessionID == sessionID
+}
+
+// RefExists checks if a ref exists in the repository.
+func (env *TestEnv) RefExists(refName string) bool {
+	env.T.Helper()
+
+	repo, err := git.PlainOpen(env.RepoDir)
+	if err != nil {
+		env.T.Fatalf("failed to open git repo: %v", err)
+	}
+
+	_, err = repo.Reference(plumbing.ReferenceName(refName), true)
+	return err == nil
+}
+
 // GetLatestCommitMessageOnBranch returns the commit message of the latest commit on the given branch.
 func (env *TestEnv) GetLatestCommitMessageOnBranch(branchName string) string {
 	env.T.Helper()
@@ -917,11 +1028,11 @@ func (env *TestEnv) gitCommitWithShadowHooks(message string, simulateTTY bool, f
 	if simulateTTY {
 		// Simulate human at terminal: ENTIRE_TEST_TTY=1 makes hasTTY() return true
 		// and askConfirmTTY() return defaultYes without reading from /dev/tty.
-		prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=1")
+		prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=1")
 	} else {
 		// Simulate agent: ENTIRE_TEST_TTY=0 makes hasTTY() return false,
 		// triggering the fast path that adds trailers for ACTIVE sessions.
-		prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=0")
+		prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=0")
 	}
 	if output, err := prepCmd.CombinedOutput(); err != nil {
 		env.T.Logf("prepare-commit-msg output: %s", output)
@@ -960,10 +1071,19 @@ func (env *TestEnv) gitCommitWithShadowHooks(message string, simulateTTY bool, f
 	// This triggers condensation if the commit has an Entire-Checkpoint trailer
 	postCmd := exec.Command(getTestBinary(), "hooks", "git", "post-commit")
 	postCmd.Dir = env.RepoDir
+	postCmd.Env = env.gitHookEnv()
 	if output, err := postCmd.CombinedOutput(); err != nil {
 		env.T.Logf("post-commit output: %s", output)
 		// Don't fail - hook may silently succeed
 	}
+}
+
+func (env *TestEnv) gitHookEnv(extra ...string) []string {
+	envVars := append(testutil.GitIsolatedEnv(),
+		"ENTIRE_TEST_OPENCODE_PROJECT_DIR="+env.OpenCodeProjectDir,
+		"ENTIRE_TEST_OPENCODE_MOCK_EXPORT=1",
+	)
+	return append(envVars, extra...)
 }
 
 // GitCommitAmendWithShadowHooks amends the last commit with shadow hooks.
@@ -987,7 +1107,7 @@ func (env *TestEnv) GitCommitAmendWithShadowHooks(message string, files ...strin
 	// Set ENTIRE_TEST_TTY=1 to simulate human (amend is always a human operation).
 	prepCmd := exec.Command(getTestBinary(), "hooks", "git", "prepare-commit-msg", msgFile, "commit")
 	prepCmd.Dir = env.RepoDir
-	prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=1")
+	prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=1")
 	if output, err := prepCmd.CombinedOutput(); err != nil {
 		env.T.Logf("prepare-commit-msg (amend) output: %s", output)
 	}
@@ -1024,6 +1144,7 @@ func (env *TestEnv) GitCommitAmendWithShadowHooks(message string, files ...strin
 	// Run post-commit hook
 	postCmd := exec.Command(getTestBinary(), "hooks", "git", "post-commit")
 	postCmd.Dir = env.RepoDir
+	postCmd.Env = env.gitHookEnv()
 	if output, err := postCmd.CombinedOutput(); err != nil {
 		env.T.Logf("post-commit (amend) output: %s", output)
 	}
@@ -1051,7 +1172,7 @@ func (env *TestEnv) GitCommitWithTrailerRemoved(message string, files ...string)
 	// the user removes the trailer before committing).
 	prepCmd := exec.Command(getTestBinary(), "hooks", "git", "prepare-commit-msg", msgFile)
 	prepCmd.Dir = env.RepoDir
-	prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=1")
+	prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=1")
 	if output, err := prepCmd.CombinedOutput(); err != nil {
 		env.T.Logf("prepare-commit-msg output: %s", output)
 	}
@@ -1105,6 +1226,7 @@ func (env *TestEnv) GitCommitWithTrailerRemoved(message string, files ...string)
 	// Run post-commit hook - since trailer was removed, no condensation should happen
 	postCmd := exec.Command(getTestBinary(), "hooks", "git", "post-commit")
 	postCmd.Dir = env.RepoDir
+	postCmd.Env = env.gitHookEnv()
 	if output, err := postCmd.CombinedOutput(); err != nil {
 		env.T.Logf("post-commit output: %s", output)
 	}
@@ -1145,9 +1267,9 @@ func (env *TestEnv) gitCommitStagedWithShadowHooks(message string, simulateTTY b
 	prepCmd := exec.Command(getTestBinary(), "hooks", "git", "prepare-commit-msg", msgFile, "message")
 	prepCmd.Dir = env.RepoDir
 	if simulateTTY {
-		prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=1")
+		prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=1")
 	} else {
-		prepCmd.Env = append(testutil.GitIsolatedEnv(), "ENTIRE_TEST_TTY=0")
+		prepCmd.Env = env.gitHookEnv("ENTIRE_TEST_TTY=0")
 	}
 	if output, err := prepCmd.CombinedOutput(); err != nil {
 		env.T.Logf("prepare-commit-msg output: %s", output)
@@ -1184,6 +1306,7 @@ func (env *TestEnv) gitCommitStagedWithShadowHooks(message string, simulateTTY b
 	// Run post-commit hook
 	postCmd := exec.Command(getTestBinary(), "hooks", "git", "post-commit")
 	postCmd.Dir = env.RepoDir
+	postCmd.Env = env.gitHookEnv()
 	if output, err := postCmd.CombinedOutput(); err != nil {
 		env.T.Logf("post-commit output: %s", output)
 	}
@@ -1819,7 +1942,7 @@ func (env *TestEnv) FetchMetadataBranch(remoteURL string) {
 
 	branchName := paths.MetadataBranchName
 	refSpec := "+refs/heads/" + branchName + ":refs/heads/" + branchName
-	cmd := exec.CommandContext(env.T.Context(), "git", "fetch", "--no-tags", remoteURL, refSpec)
+	cmd := exec.CommandContext(env.T.Context(), "git", "fetch", "--no-tags", "--filter=blob:none", remoteURL, refSpec)
 	cmd.Dir = env.RepoDir
 	cmd.Env = testutil.GitIsolatedEnv()
 

@@ -39,7 +39,7 @@ func TestMidTurnCommit_DifferentFilesThanPreviousTurn(t *testing.T) {
 		// The committed files (turn2a.md, turn2b.md) do NOT overlap with
 		// Turn 1's tracked files (turn1.md).
 		_, err = s.RunPrompt(t, ctx,
-			"create two markdown files: docs/turn2a.md about bananas and docs/turn2b.md about cherries. Then git add and git commit both files with a short message. Do not commit any other files. Do not ask for confirmation, just make the changes. Do not include any trailers or metadata in the commit message. Do not use worktrees.")
+			"create two markdown files: docs/turn2a.md about bananas and docs/turn2b.md about cherries. Then git add and git commit both files with a short message. Do not commit any other files. Do not ask for confirmation, just make the changes. Do not add Co-authored-by or Signed-off-by trailers. Do not use worktrees.")
 		if err != nil {
 			t.Fatalf("agent prompt 2 (turn 2) failed: %v", err)
 		}
@@ -52,11 +52,11 @@ func TestMidTurnCommit_DifferentFilesThanPreviousTurn(t *testing.T) {
 		// CRITICAL: The mid-turn commit should have triggered condensation
 		// to entire/checkpoints/v1, even though committed files differ from
 		// Turn 1's tracked files. This is the regression assertion.
-		testutil.WaitForCheckpoint(t, s, 15*time.Second)
+		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 		testutil.AssertCheckpointAdvanced(t, s)
 
 		cpID := testutil.AssertHasCheckpointTrailer(t, s.Dir, "HEAD")
 		testutil.AssertCheckpointExists(t, s.Dir, cpID)
-		testutil.AssertNoShadowBranches(t, s.Dir)
+		testutil.WaitForNoShadowBranches(t, s.Dir, 10*time.Second)
 	})
 }

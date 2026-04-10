@@ -12,6 +12,7 @@ import (
 
 	// Import agents to register them
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
+	_ "github.com/entireio/cli/cmd/entire/cli/agent/codex"
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid"
 )
 
@@ -94,6 +95,18 @@ func GetAgentsWithHooksInstalled(ctx context.Context) []types.AgentName {
 		}
 	}
 	return installed
+}
+
+// InstalledAgentDisplayNames returns user-facing display names for agents with hooks installed.
+func InstalledAgentDisplayNames(ctx context.Context) []string {
+	installedNames := GetAgentsWithHooksInstalled(ctx)
+	displayNames := make([]string, 0, len(installedNames))
+	for _, name := range installedNames {
+		if ag, err := agent.Get(name); err == nil {
+			displayNames = append(displayNames, string(ag.Type()))
+		}
+	}
+	return displayNames
 }
 
 // JoinAgentNames joins agent names into a comma-separated string.

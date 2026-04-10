@@ -315,11 +315,16 @@ func filterToUncommittedFiles(ctx context.Context, files []string, repoRoot stri
 		return files // fail open
 	}
 
+	logCtx := logging.WithComponent(ctx, "filter-uncommitted")
+
 	var result []string
 	for _, relPath := range files {
 		headFile, err := headTree.File(relPath)
 		if err != nil {
 			// File not in HEAD — it's uncommitted
+			logging.Debug(logCtx, "file not in HEAD tree, keeping",
+				slog.String("file", relPath),
+				slog.String("error", err.Error()))
 			result = append(result, relPath)
 			continue
 		}
@@ -361,7 +366,7 @@ func FilterAndNormalizePaths(files []string, cwd string) []string {
 		if paths.IsInfrastructurePath(relPath) {
 			continue // skip .entire directory
 		}
-		result = append(result, relPath)
+		result = append(result, filepath.ToSlash(relPath))
 	}
 	return result
 }

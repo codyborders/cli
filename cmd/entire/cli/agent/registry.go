@@ -101,6 +101,7 @@ func Detect(ctx context.Context) (Agent, error) {
 // Agent name constants (registry keys)
 const (
 	AgentNameClaudeCode     types.AgentName = "claude-code"
+	AgentNameCodex          types.AgentName = "codex"
 	AgentNameCopilotCLI     types.AgentName = "copilot-cli"
 	AgentNameCursor         types.AgentName = "cursor"
 	AgentNameFactoryAIDroid types.AgentName = "factoryai-droid"
@@ -111,12 +112,13 @@ const (
 // Agent type constants (type identifiers stored in metadata/trailers)
 const (
 	AgentTypeClaudeCode     types.AgentType = "Claude Code"
+	AgentTypeCodex          types.AgentType = "Codex"
 	AgentTypeCopilotCLI     types.AgentType = "Copilot CLI"
 	AgentTypeCursor         types.AgentType = "Cursor"
 	AgentTypeFactoryAIDroid types.AgentType = "Factory AI Droid"
 	AgentTypeGemini         types.AgentType = "Gemini CLI"
 	AgentTypeOpenCode       types.AgentType = "OpenCode"
-	AgentTypeUnknown        types.AgentType = "Agent" // Fallback for backwards compatibility
+	AgentTypeUnknown        types.AgentType = "Unknown"
 )
 
 // DefaultAgentName is the registry key for the default agent.

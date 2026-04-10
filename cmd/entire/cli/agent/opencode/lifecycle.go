@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
 )
+
+var runOpenCodeExportToFileFn = runOpenCodeExportToFile
 
 // Hook name constants — these become CLI subcommands under `entire hooks opencode`.
 const (
@@ -182,24 +186,29 @@ func (a *OpenCodeAgent) fetchAndCacheExport(ctx context.Context, sessionID strin
 		return "", fmt.Errorf("mock export file not found: %s (ENTIRE_TEST_OPENCODE_MOCK_EXPORT is set)", tmpFile)
 	}
 
-	// Call opencode export to get the transcript (always refresh on each turn)
-	data, err := runOpenCodeExport(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("opencode export failed: %w", err)
-	}
-
-	// Validate output is valid JSON before caching
-	if !json.Valid(data) {
-		return "", fmt.Errorf("opencode export returned invalid JSON (%d bytes)", len(data))
-	}
-
-	// Write to temp directory under .entire
+	// Write export directly to temp file under .entire. Avoid stdout capture,
+	// which can truncate large payloads in some opencode versions.
 	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
-	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write export file: %w", err)
+	if err := runOpenCodeExportToFileFn(ctx, sessionID, tmpFile); err != nil {
+		return "", fmt.Errorf("opencode export failed: %w", err)
+	}
+
+	//nolint:gosec // tmpFile is constructed from validated session ID under repo .entire/tmp
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read export file: %w", err)
+	}
+
+	if !json.Valid(data) {
+		logging.Debug(logging.WithComponent(ctx, "lifecycle"),
+			"opencode export file contained invalid JSON",
+			slog.Int("bytes", len(data)),
+			slog.String("path", tmpFile),
+		)
+		return "", fmt.Errorf("opencode export returned invalid JSON (%d bytes)", len(data))
 	}
 
 	return tmpFile, nil

@@ -234,6 +234,22 @@ func TestFilterAndNormalizePaths_SiblingDirectories(t *testing.T) {
 			},
 		},
 		{
+			// On Windows, git status returns paths with backslashes (e.g., "src\file.ts").
+			// filepath.ToSlash normalizes these to forward slashes for consistent storage.
+			// On Linux/macOS, filepath.Separator is already '/', so ToSlash is a no-op —
+			// we use strings.ReplaceAll to simulate the Windows input on all platforms.
+			name: "platform separator paths are normalized to forward slashes",
+			files: []string{
+				"src" + string(filepath.Separator) + "file.ts",
+				"lib" + string(filepath.Separator) + "nested" + string(filepath.Separator) + "util.go",
+			},
+			basePath: "/repo",
+			want: []string{
+				"src/file.ts",
+				"lib/nested/util.go",
+			},
+		},
+		{
 			name: "infrastructure paths are filtered",
 			files: []string{
 				"/repo/src/file.ts",
@@ -778,5 +794,48 @@ func TestMergeUnique(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFilterToUncommittedFiles_ReallyModified(t *testing.T) {
+	// Verify that files with genuinely different content are kept.
+
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	repo, err := git.PlainInit(tmpDir, false)
+	if err != nil {
+		t.Fatalf("failed to init repo: %v", err)
+	}
+
+	filePath := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("original\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get worktree: %v", err)
+	}
+	if _, err := wt.Add("file.txt"); err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
+	if _, err := wt.Commit("Initial commit", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Test User",
+			Email: "test@example.com",
+		},
+	}); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	// Modify the file with genuinely different content
+	if err := os.WriteFile(filePath, []byte("modified\n"), 0o644); err != nil {
+		t.Fatalf("failed to rewrite file: %v", err)
+	}
+
+	result := filterToUncommittedFiles(context.Background(), []string{"file.txt"}, tmpDir)
+	if len(result) != 1 || result[0] != "file.txt" {
+		t.Errorf("filterToUncommittedFiles() = %v, want [file.txt]", result)
 	}
 }
