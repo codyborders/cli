@@ -347,6 +347,12 @@ func TestUpdateCommand(t *testing.T) {
 			want:           "scoop update entire/cli",
 		},
 		{
+			name:           "unknown path stable falls back to stable curl command",
+			currentVersion: "1.0.0",
+			execPath:       func() (string, error) { return "/usr/local/bin/entire", nil },
+			want:           "curl -fsSL https://entire.io/install.sh | bash",
+		},
+		{
 			name:           "unknown path nightly falls back to nightly curl command",
 			currentVersion: "1.0.1-nightly.202604101200.abc1234",
 			execPath:       func() (string, error) { return "/usr/local/bin/entire", nil },
