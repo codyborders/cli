@@ -69,8 +69,8 @@ type userTextBlock struct {
 }
 
 // Compact converts a full.jsonl transcript into the condensed transcript.jsonl format.
-// The input must be pre-redacted — callers are responsible for running
-// redact.JSONLBytes before calling this function.
+// The input must be pre-redacted (via redact.JSONLBytes or
+// redact.AlreadyRedacted for trusted sources).
 //
 // The output format puts version, agent, and cli_version on every line,
 // merges streaming assistant fragments with the same message ID, and inlines

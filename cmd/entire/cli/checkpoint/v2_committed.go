@@ -542,7 +542,8 @@ func (s *V2GitStore) writeCommittedFullTranscript(ctx context.Context, opts Writ
 // writeTranscriptBlobs writes pre-redacted, chunked transcript blobs to entries.
 // Returns the transcript bytes so the caller can compute the content hash.
 func (s *V2GitStore) writeTranscriptBlobs(ctx context.Context, transcript redact.RedactedBytes, agentType types.AgentType, sessionPath string, entries map[string]object.TreeEntry) ([]byte, error) {
-	chunks, err := agent.ChunkTranscript(ctx, transcript.Bytes(), agentType)
+	raw := transcript.Bytes()
+	chunks, err := agent.ChunkTranscript(ctx, raw, agentType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to chunk transcript: %w", err)
 	}
@@ -560,7 +561,7 @@ func (s *V2GitStore) writeTranscriptBlobs(ctx context.Context, transcript redact
 		}
 	}
 
-	return transcript.Bytes(), nil
+	return raw, nil
 }
 
 // validateWriteOpts validates identifiers in WriteCommittedOptions.

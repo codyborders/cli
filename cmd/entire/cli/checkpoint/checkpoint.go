@@ -214,7 +214,7 @@ type WriteCommittedOptions struct {
 	Branch string
 
 	// Transcript is the session transcript content (full.jsonl).
-	// Must be pre-redacted by the caller via redact.JSONLBytes.
+	// Must be pre-redacted (via redact.JSONLBytes or redact.AlreadyRedacted for trusted sources).
 	Transcript redact.RedactedBytes
 
 	// Prompts contains user prompts from the session
@@ -317,7 +317,7 @@ type UpdateCommittedOptions struct {
 	SessionID string
 
 	// Transcript is the full session transcript (replaces existing).
-	// Must be pre-redacted by the caller via redact.JSONLBytes.
+	// Must be pre-redacted (via redact.JSONLBytes or redact.AlreadyRedacted for trusted sources).
 	Transcript redact.RedactedBytes
 
 	// Prompts contains all user prompts (replaces existing)
