@@ -13,6 +13,8 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
+	"github.com/entireio/cli/cmd/entire/cli/transcript/compact"
+	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
@@ -358,7 +360,12 @@ func TestMigrateCheckpointsV2_UsesComputedCompactTranscriptStart(t *testing.T) {
 	require.NoError(t, err)
 	fullCompacted := tryCompactTranscript(ctx, v1Content.Transcript, v1Content.Metadata)
 	require.NotNil(t, fullCompacted)
-	scopedCompacted := tryCompactTranscriptScoped(ctx, v1Content.Transcript, v1Content.Metadata)
+	scopedCompacted, err := compact.Compact(v1Content.Transcript, compact.MetadataFields{
+		Agent:      string(v1Content.Metadata.Agent),
+		CLIVersion: versioninfo.Version,
+		StartLine:  v1Content.Metadata.GetTranscriptStart(),
+	})
+	require.NoError(t, err)
 	require.NotNil(t, scopedCompacted)
 	require.Greater(t, bytes.Count(fullCompacted, []byte{'\n'}), bytes.Count(scopedCompacted, []byte{'\n'}))
 	expectedOffset := computeCompactOffset(ctx, v1Content.Transcript, fullCompacted, v1Content.Metadata)

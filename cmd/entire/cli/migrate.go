@@ -417,10 +417,6 @@ func tryCompactTranscript(ctx context.Context, transcript []byte, m checkpoint.C
 	return compactTranscriptForStartLine(ctx, transcript, m, 0)
 }
 
-func tryCompactTranscriptScoped(ctx context.Context, transcript []byte, m checkpoint.CommittedMetadata) []byte {
-	return compactTranscriptForStartLine(ctx, transcript, m, m.GetTranscriptStart())
-}
-
 func compactTranscriptForStartLine(ctx context.Context, transcript []byte, m checkpoint.CommittedMetadata, startLine int) []byte {
 	if len(transcript) == 0 {
 		return nil
