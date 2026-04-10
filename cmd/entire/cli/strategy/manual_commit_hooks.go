@@ -2507,10 +2507,13 @@ func (s *ManualCommitStrategy) finalizeAllTurnCheckpoints(ctx context.Context, s
 		prompts = readPromptsFromFilesystem(ctx, state.SessionID)
 	}
 
-	// Redact secrets before writing — matches WriteCommitted behavior.
-	// The live transcript on disk contains raw content; redaction must happen
-	// before anything is persisted to the metadata branch.
+	// Redact secrets before writing. Checkpoint store methods require
+	// pre-redacted in-memory transcript content from callers. The live
+	// transcript on disk is still treated as raw/untrusted input, so redact it
+	// here before anything is persisted to the metadata branch.
+	_, redactSpan := perf.Start(logCtx, "redact_transcript")
 	redactedTranscript, redactErr := redact.JSONLBytes(fullTranscript)
+	redactSpan.End()
 	if redactErr != nil {
 		logging.Warn(logCtx, "finalize: transcript redaction failed, skipping",
 			slog.String("session_id", state.SessionID),

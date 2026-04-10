@@ -20,6 +20,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/strategy"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
+	"github.com/entireio/cli/perf"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
 	"github.com/entireio/cli/redact"
 
@@ -140,7 +141,9 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 
 	tokenUsage := agent.CalculateTokenUsage(logCtx, ag, transcriptData, 0, "")
 
+	_, redactSpan := perf.Start(ctx, "redact_transcript")
 	redactedTranscript, redactErr := redact.JSONLBytes(storedTranscript)
+	redactSpan.End()
 	if redactErr != nil {
 		return fmt.Errorf("failed to redact transcript: %w", redactErr)
 	}
