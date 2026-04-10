@@ -102,6 +102,8 @@ type condenseOpts struct {
 	allAgentFiles    map[string]struct{} // Union of all sessions' FilesTouched for cross-session exclusion (nil = single-session)
 }
 
+var redactSessionJSONLBytes = redact.JSONLBytes
+
 // CondenseSession condenses a session's shadow branch to permanent storage.
 // checkpointID is the 12-hex-char value from the Entire-Checkpoint trailer.
 // Metadata is stored at sharded path: <checkpoint_id[:2]>/<checkpoint_id[2:]>/
@@ -198,23 +200,15 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		}
 	}
 
-	// Redact the transcript once. The result is passed to both the compact
-	// package (for v2 transcript.jsonl) and the checkpoint stores (for v1
-	// and v2 full transcript).
-	redactStart := time.Now()
-	_, redactSpan := perf.Start(ctx, "redact_transcript")
-	var redactedTranscript redact.RedactedBytes
-	if len(sessionData.Transcript) > 0 {
-		var redactErr error
-		redactedTranscript, redactErr = redact.JSONLBytes(sessionData.Transcript)
-		if redactErr != nil {
-			redactSpan.RecordError(redactErr)
-			redactSpan.End()
-			return nil, fmt.Errorf("failed to redact transcript secrets: %w", redactErr)
-		}
+	redactedTranscript, redactDuration, err := redactSessionTranscript(ctx, sessionData.Transcript)
+	if err != nil {
+		logging.Warn(logCtx, "failed to redact transcript secrets, dropping transcript for checkpoint",
+			slog.String("session_id", state.SessionID),
+			slog.String("checkpoint_id", checkpointID.String()),
+			slog.String("error", err.Error()),
+		)
+		redactedTranscript = redact.RedactedBytes{}
 	}
-	redactSpan.End()
-	redactDuration := time.Since(redactStart)
 
 	// Get checkpoint store
 	store, err := s.getCheckpointStore()
@@ -326,6 +320,26 @@ func (s *ManualCommitStrategy) CondenseSession(ctx context.Context, repo *git.Re
 		TotalTranscriptLines: sessionData.FullTranscriptLines,
 		Transcript:           sessionData.Transcript,
 	}, nil
+}
+
+// redactSessionTranscript redacts the transcript once for use by both the compact
+// package and the checkpoint stores. Returns the redacted bytes and the duration
+// of the redaction operation for perf logging.
+func redactSessionTranscript(ctx context.Context, transcript []byte) (redact.RedactedBytes, time.Duration, error) {
+	start := time.Now()
+	_, span := perf.Start(ctx, "redact_transcript")
+	defer span.End()
+
+	if len(transcript) == 0 {
+		return redact.RedactedBytes{}, time.Since(start), nil
+	}
+
+	redacted, err := redactSessionJSONLBytes(transcript)
+	if err != nil {
+		span.RecordError(err)
+		return redact.RedactedBytes{}, time.Since(start), fmt.Errorf("failed to redact transcript secrets: %w", err)
+	}
+	return redacted, time.Since(start), nil
 }
 
 // generateSummary produces an LLM-generated summary of the session transcript.
