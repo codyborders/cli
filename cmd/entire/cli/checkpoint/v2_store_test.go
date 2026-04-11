@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/entireio/cli/redact"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,18 +25,12 @@ func initTestRepo(t *testing.T) *git.Repository {
 	t.Helper()
 	dir := t.TempDir()
 
-	repo, err := git.PlainInit(dir, false)
-	require.NoError(t, err)
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "README.md", "init")
+	testutil.GitAdd(t, dir, "README.md")
+	testutil.GitCommit(t, dir, "initial")
 
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0o644))
-	_, err = wt.Add("README.md")
-	require.NoError(t, err)
-	_, err = wt.Commit("initial", &git.CommitOptions{
-		Author: &object.Signature{Name: "Test", Email: "test@test.com"},
-	})
+	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 
 	return repo
@@ -378,6 +371,42 @@ func TestV2GitStore_WriteCommittedMain_NoCompactTranscript_SkipsGracefully(t *te
 	require.NoError(t, err)
 	_, err = sessionTree.File(paths.CompactTranscriptFileName)
 	assert.Error(t, err, "transcript.jsonl should not exist when CompactTranscript is nil")
+}
+
+func TestV2GitStore_WriteCommittedMain_UsesCompactTranscriptStart(t *testing.T) {
+	t.Parallel()
+	repo := initTestRepo(t)
+	store := NewV2GitStore(repo, "origin")
+	ctx := context.Background()
+
+	cpID := id.MustCheckpointID("a1b2c3d4e5f7")
+	compactData := []byte("{\"v\":1,\"type\":\"user\",\"content\":\"hello\"}\n{\"v\":1,\"type\":\"assistant\",\"content\":\"hi\"}\n")
+
+	_, err := store.writeCommittedMain(ctx, WriteCommittedOptions{
+		CheckpointID:              cpID,
+		SessionID:                 "test-session-compact-start",
+		Strategy:                  "manual-commit",
+		Transcript:                redact.AlreadyRedacted([]byte(`{"type":"human","message":"hello"}`)),
+		CompactTranscript:         compactData,
+		Prompts:                   []string{"hello"},
+		AuthorName:                "Test",
+		AuthorEmail:               "test@test.com",
+		CheckpointTranscriptStart: 42, // full.jsonl offset (must not be used in v2 metadata)
+		CompactTranscriptStart:    15, // transcript.jsonl offset (must be used in v2 metadata)
+	})
+	require.NoError(t, err)
+
+	tree := v2MainTree(t, repo)
+	cpPath := cpID.Path()
+
+	// Read session metadata from /main
+	metadataContent := v2ReadFile(t, tree, cpPath+"/0/"+paths.MetadataFileName)
+	var metadata CommittedMetadata
+	require.NoError(t, json.Unmarshal([]byte(metadataContent), &metadata))
+
+	// v2 should store the compact offset, not the full transcript offset.
+	assert.Equal(t, 15, metadata.CheckpointTranscriptStart,
+		"v2 /main metadata should use CompactTranscriptStart for checkpoint_transcript_start")
 }
 
 func TestV2GitStore_UpdateCommitted_WritesCompactTranscript(t *testing.T) {
