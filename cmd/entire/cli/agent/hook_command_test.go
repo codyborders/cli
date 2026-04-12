@@ -56,3 +56,57 @@ func TestMissingEntireWarning(t *testing.T) {
 		t.Fatalf("multiline warning should contain newlines, got %q", got)
 	}
 }
+
+func TestIsManagedHookCommand_DirectPrefix(t *testing.T) {
+	t.Parallel()
+
+	prefixes := []string{"entire ", `go run "$(git rev-parse --show-toplevel)"/cmd/entire/main.go `}
+
+	if !IsManagedHookCommand("entire hooks codex stop", prefixes) {
+		t.Fatal("expected direct entire command to match")
+	}
+	if !IsManagedHookCommand(`go run "$(git rev-parse --show-toplevel)"/cmd/entire/main.go hooks codex stop`, prefixes) {
+		t.Fatal("expected local-dev command to match")
+	}
+}
+
+func TestIsManagedHookCommand_WrappedPrefix(t *testing.T) {
+	t.Parallel()
+
+	prefixes := []string{"entire "}
+
+	if !IsManagedHookCommand(
+		WrapProductionSilentHookCommand("entire hooks cursor stop"),
+		prefixes,
+	) {
+		t.Fatal("expected wrapped silent command to match")
+	}
+	if !IsManagedHookCommand(
+		WrapProductionJSONWarningHookCommand("entire hooks claude-code session-start", WarningFormatSingleLine),
+		prefixes,
+	) {
+		t.Fatal("expected wrapped json warning command to match")
+	}
+	if !IsManagedHookCommand(
+		WrapProductionPlainTextWarningHookCommand("entire hooks factoryai-droid stop", WarningFormatSingleLine),
+		prefixes,
+	) {
+		t.Fatal("expected wrapped plain text warning command to match")
+	}
+}
+
+func TestIsManagedHookCommand_DoesNotMatchSubstring(t *testing.T) {
+	t.Parallel()
+
+	prefixes := []string{"entire ", `go run "$(git rev-parse --show-toplevel)"/cmd/entire/main.go `}
+
+	if IsManagedHookCommand(`echo "the entire workflow finished"`, prefixes) {
+		t.Fatal("unexpected match for unrelated substring command")
+	}
+	if IsManagedHookCommand(`sh -c 'echo "the entire workflow finished"; exit 0'`, prefixes) {
+		t.Fatal("unexpected match for unrelated wrapped shell command")
+	}
+	if IsManagedHookCommand(`sh -c 'if ! command -v entire >/dev/null 2>&1; then exit 0; fi; exec echo "the entire workflow finished"'`, prefixes) {
+		t.Fatal("unexpected match for wrapper that does not exec an Entire hook")
+	}
+}

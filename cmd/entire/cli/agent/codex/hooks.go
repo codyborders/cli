@@ -298,12 +298,7 @@ func addHook(groups []MatcherGroup, command string) []MatcherGroup {
 }
 
 func isEntireHook(command string) bool {
-	for _, prefix := range entireHookPrefixes {
-		if strings.Contains(command, prefix) {
-			return true
-		}
-	}
-	return false
+	return agent.IsManagedHookCommand(command, entireHookPrefixes)
 }
 
 func hasEntireHook(groups []MatcherGroup) bool {

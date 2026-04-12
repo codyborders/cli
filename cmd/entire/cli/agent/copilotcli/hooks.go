@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -315,12 +314,7 @@ func hookBashExists(entries []CopilotHookEntry, bash string) bool {
 
 // isEntireHook checks if a hook entry's bash command belongs to Entire.
 func isEntireHook(bash string) bool {
-	for _, prefix := range entireHookPrefixes {
-		if strings.Contains(bash, prefix) {
-			return true
-		}
-	}
-	return false
+	return agent.IsManagedHookCommand(bash, entireHookPrefixes)
 }
 
 // hasEntireHook checks if any entry in the slice is an Entire hook.

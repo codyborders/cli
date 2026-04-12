@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -462,12 +461,7 @@ func addHookToMatcher(matchers []ClaudeHookMatcher, matcherName, command string)
 
 // isEntireHook checks if a command is an Entire hook (old or new format)
 func isEntireHook(command string) bool {
-	for _, prefix := range entireHookPrefixes {
-		if strings.Contains(command, prefix) {
-			return true
-		}
-	}
-	return false
+	return agent.IsManagedHookCommand(command, entireHookPrefixes)
 }
 
 // removeEntireHooks removes all Entire hooks from a list of matchers (for simple hooks like Stop)

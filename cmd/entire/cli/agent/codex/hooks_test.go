@@ -104,6 +104,39 @@ func TestUninstallHooks(t *testing.T) {
 	require.False(t, ag.AreHooksInstalled(context.Background()))
 }
 
+func TestUninstallHooks_PreservesUserHookContainingEntireSubstring(t *testing.T) {
+	tempDir := setupTestEnv(t)
+
+	codexDir := filepath.Join(tempDir, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0o750))
+	existingConfig := `{
+		"hooks": {
+			"Stop": [
+				{
+					"matcher": null,
+					"hooks": [
+						{"type": "command", "command": "echo \"the entire workflow finished\""}
+					]
+				}
+			]
+		}
+	}`
+	hooksPath := filepath.Join(codexDir, HooksFileName)
+	require.NoError(t, os.WriteFile(hooksPath, []byte(existingConfig), 0o600))
+
+	ag := &CodexAgent{}
+	_, err := ag.InstallHooks(context.Background(), false, false)
+	require.NoError(t, err)
+
+	err = ag.UninstallHooks(context.Background())
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(hooksPath)
+	require.NoError(t, readErr)
+	require.Contains(t, string(data), `echo \"the entire workflow finished\"`)
+	require.NotContains(t, string(data), "entire hooks codex stop")
+}
+
 func TestAreHooksInstalled_NoFile(t *testing.T) {
 	setupTestEnv(t)
 

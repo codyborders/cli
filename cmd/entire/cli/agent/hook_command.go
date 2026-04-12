@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
 )
@@ -61,4 +62,33 @@ func WrapProductionPlainTextWarningHookCommand(command string, format WarningFor
 		MissingEntireWarning(format),
 		command,
 	)
+}
+
+const productionHookWrapperPrefix = `sh -c 'if ! command -v entire >/dev/null 2>&1; then `
+
+// IsManagedHookCommand reports whether command is either a direct Entire hook
+// command or one of Entire's production wrapper forms that exec that command.
+func IsManagedHookCommand(command string, prefixes []string) bool {
+	if hasManagedHookPrefix(command, prefixes) {
+		return true
+	}
+	if !strings.HasPrefix(command, productionHookWrapperPrefix) {
+		return false
+	}
+
+	_, wrappedCommand, ok := strings.Cut(command, "; fi; exec ")
+	if !ok {
+		return false
+	}
+
+	return hasManagedHookPrefix(wrappedCommand, prefixes)
+}
+
+func hasManagedHookPrefix(command string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(command, prefix) {
+			return true
+		}
+	}
+	return false
 }

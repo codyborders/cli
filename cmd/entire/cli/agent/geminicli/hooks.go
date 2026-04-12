@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -472,12 +471,7 @@ func addGeminiHook(matchers []GeminiHookMatcher, matcherName, hookName, command 
 
 // isEntireHook checks if a command is an Entire hook
 func isEntireHook(command string) bool {
-	for _, prefix := range entireHookPrefixes {
-		if strings.Contains(command, prefix) {
-			return true
-		}
-	}
-	return false
+	return agent.IsManagedHookCommand(command, entireHookPrefixes)
 }
 
 // hasEntireHook checks if any hook in the matchers is an Entire hook
