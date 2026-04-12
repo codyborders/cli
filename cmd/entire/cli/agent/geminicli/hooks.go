@@ -278,7 +278,7 @@ func writeGeminiSettingsFile(rawSettings map[string]json.RawMessage, rawHooks ma
 		return fmt.Errorf("failed to create .gemini directory: %w", err)
 	}
 
-	output, err := json.MarshalIndent(rawSettings, "", "  ")
+	output, err := jsonutil.MarshalIndentWithNewline(rawSettings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
@@ -398,7 +398,7 @@ func (g *GeminiCLIAgent) UninstallHooks(ctx context.Context) error {
 	}
 
 	// Write back
-	output, err := json.MarshalIndent(rawSettings, "", "  ")
+	output, err := jsonutil.MarshalIndentWithNewline(rawSettings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
