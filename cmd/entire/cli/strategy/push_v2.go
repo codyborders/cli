@@ -45,9 +45,10 @@ func tryPushRef(ctx context.Context, target string, refName plumbing.ReferenceNa
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	// Use --no-verify to prevent recursive hook calls (this runs inside pre-push)
+	// Use --no-verify to prevent recursive hook calls (this runs inside pre-push).
+	// Use --porcelain for machine-readable, locale-independent output.
 	refSpec := fmt.Sprintf("%s:%s", refName, refName)
-	cmd := CheckpointGitCommand(ctx, target, "push", "--no-verify", target, refSpec)
+	cmd := CheckpointGitCommand(ctx, target, "push", "--no-verify", "--porcelain", target, refSpec)
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)

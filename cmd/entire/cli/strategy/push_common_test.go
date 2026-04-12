@@ -1102,18 +1102,31 @@ func TestPrintSettingsCommitHint(t *testing.T) {
 
 // captureStderr redirects os.Stderr to a pipe and returns a function that restores
 // stderr and returns the captured output. Must be called on the main goroutine
-// (not parallel-safe).
+// (not parallel-safe). Uses t.Cleanup as a safety net to restore stderr and close
+// pipe file descriptors if the test fails or panics before the returned function
+// is called.
 func captureStderr(t *testing.T) func() string {
 	t.Helper()
 	old := os.Stderr
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	os.Stderr = w
+
+	// Safety net: restore stderr and close pipe ends on test failure/panic.
+	// In the normal path the returned function handles cleanup first;
+	// duplicate Close calls return an error that we intentionally ignore.
+	t.Cleanup(func() {
+		os.Stderr = old
+		_ = w.Close()
+		_ = r.Close()
+	})
+
 	return func() string {
-		w.Close()
+		_ = w.Close()
 		var buf bytes.Buffer
 		_, readErr := buf.ReadFrom(r)
 		require.NoError(t, readErr)
+		_ = r.Close()
 		os.Stderr = old
 		return buf.String()
 	}

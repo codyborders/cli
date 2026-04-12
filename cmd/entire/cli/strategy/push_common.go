@@ -163,13 +163,20 @@ type pushResult struct {
 	upToDate bool
 }
 
-// parsePushResult checks git push output for known status strings and returns
-// a pushResult. git prints "Everything up-to-date" to stderr when nothing was pushed.
+// parsePushResult checks git push --porcelain output for ref status flags.
+// In porcelain mode, each ref gets a tab-delimited status line:
+//
+//	<flag>\t<from>:<to>\t<summary>
+//
+// where flag '=' means the ref was already up-to-date. This is locale-independent,
+// unlike the human-readable "Everything up-to-date" message.
 func parsePushResult(output string) pushResult {
-	return pushResult{
-		upToDate: strings.Contains(output, "Everything up-to-date") ||
-			strings.Contains(output, "everything up-to-date"),
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "=\t") {
+			return pushResult{upToDate: true}
+		}
 	}
+	return pushResult{upToDate: false}
 }
 
 // finishPush stops the progress dots and prints "already up-to-date" or "done"
@@ -189,8 +196,9 @@ func tryPushSessionsCommon(ctx context.Context, remote, branchName string) (push
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	// Use --no-verify to prevent recursive hook calls
-	cmd := CheckpointGitCommand(ctx, remote, "push", "--no-verify", remote, branchName)
+	// Use --no-verify to prevent recursive hook calls.
+	// Use --porcelain for machine-readable, locale-independent output.
+	cmd := CheckpointGitCommand(ctx, remote, "push", "--no-verify", "--porcelain", remote, branchName)
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
