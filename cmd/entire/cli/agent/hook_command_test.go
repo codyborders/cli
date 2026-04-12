@@ -5,22 +5,6 @@ import (
 	"testing"
 )
 
-func TestWrapProductionSessionStartHookCommand(t *testing.T) {
-	t.Parallel()
-
-	command := WrapProductionSessionStartHookCommand("entire hooks codex session-start", WarningFormatSingleLine)
-
-	if command == "entire hooks codex session-start" {
-		t.Fatal("expected wrapped command, got raw command")
-	}
-	if !strings.Contains(command, "Powered by Entire: Tracking is enabled") {
-		t.Fatalf("wrapped command missing warning, got %q", command)
-	}
-	if want := "exec entire hooks codex session-start"; !strings.Contains(command, want) {
-		t.Fatalf("wrapped command missing exec target, got %q", command)
-	}
-}
-
 func TestWrapProductionJSONSessionStartHookCommand(t *testing.T) {
 	t.Parallel()
 

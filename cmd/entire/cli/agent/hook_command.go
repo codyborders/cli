@@ -24,16 +24,6 @@ func MissingEntireWarning(format WarningFormat) string {
 	}
 }
 
-// WrapProductionSessionStartHookCommand writes the warning to stderr when the
-// Entire CLI is missing from PATH.
-func WrapProductionSessionStartHookCommand(command string, format WarningFormat) string {
-	return fmt.Sprintf(
-		`sh -c 'if ! command -v entire >/dev/null 2>&1; then echo "%s" >&2; exit 0; fi; exec %s'`,
-		MissingEntireWarning(format),
-		command,
-	)
-}
-
 // WrapProductionSilentHookCommand exits successfully without output when the
 // Entire CLI is missing from PATH.
 func WrapProductionSilentHookCommand(command string) string {
