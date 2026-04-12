@@ -31,6 +31,8 @@ func TestInstallHooks_CreatesConfig(t *testing.T) {
 	hooksPath := filepath.Join(tempDir, ".codex", HooksFileName)
 	data, err := os.ReadFile(hooksPath)
 	require.NoError(t, err)
+	require.Contains(t, string(data), "Powered by Entire: Tracking is enabled")
+	require.Contains(t, string(data), "installation-methods")
 	require.Contains(t, string(data), "entire hooks codex session-start")
 	require.Contains(t, string(data), "entire hooks codex user-prompt-submit")
 	require.Contains(t, string(data), "entire hooks codex stop")

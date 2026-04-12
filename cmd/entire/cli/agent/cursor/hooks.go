@@ -121,12 +121,23 @@ func (c *CursorAgent) InstallHooks(ctx context.Context, localDev bool, force boo
 	}
 
 	sessionStartCmd := cmdPrefix + HookNameSessionStart
+	if !localDev {
+		sessionStartCmd = agent.WrapProductionSessionStartHookCommand(sessionStartCmd, agent.WarningFormatSingleLine)
+	}
 	sessionEndCmd := cmdPrefix + HookNameSessionEnd
 	beforeSubmitPromptCmd := cmdPrefix + HookNameBeforeSubmitPrompt
 	stopCmd := cmdPrefix + HookNameStop
 	preCompactCmd := cmdPrefix + HookNamePreCompact
 	subagentStartCmd := cmdPrefix + HookNameSubagentStart
 	subagentEndCmd := cmdPrefix + HookNameSubagentStop
+	if !localDev {
+		sessionEndCmd = agent.WrapProductionSilentHookCommand(sessionEndCmd)
+		beforeSubmitPromptCmd = agent.WrapProductionSilentHookCommand(beforeSubmitPromptCmd)
+		stopCmd = agent.WrapProductionSilentHookCommand(stopCmd)
+		preCompactCmd = agent.WrapProductionSilentHookCommand(preCompactCmd)
+		subagentStartCmd = agent.WrapProductionSilentHookCommand(subagentStartCmd)
+		subagentEndCmd = agent.WrapProductionSilentHookCommand(subagentEndCmd)
+	}
 
 	count := 0
 
@@ -174,7 +185,7 @@ func (c *CursorAgent) InstallHooks(ctx context.Context, localDev bool, force boo
 	marshalCursorHookType(rawHooks, "subagentStop", subagentStop)
 
 	// Marshal hooks and update raw file
-	hooksJSON, err := json.Marshal(rawHooks)
+	hooksJSON, err := jsonutil.MarshalWithNoHTMLEscape(rawHooks)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal hooks: %w", err)
 	}
@@ -255,7 +266,7 @@ func (c *CursorAgent) UninstallHooks(ctx context.Context) error {
 
 	// Marshal hooks back (preserving unknown hook types)
 	if len(rawHooks) > 0 {
-		hooksJSON, err := json.Marshal(rawHooks)
+		hooksJSON, err := jsonutil.MarshalWithNoHTMLEscape(rawHooks)
 		if err != nil {
 			return fmt.Errorf("failed to marshal hooks: %w", err)
 		}
@@ -331,7 +342,7 @@ func marshalCursorHookType(rawHooks map[string]json.RawMessage, hookType string,
 		delete(rawHooks, hookType)
 		return
 	}
-	data, err := json.Marshal(entries)
+	data, err := jsonutil.MarshalWithNoHTMLEscape(entries)
 	if err != nil {
 		return // Silently ignore marshal errors (shouldn't happen)
 	}
@@ -351,7 +362,7 @@ func hookCommandExists(entries []CursorHookEntry, command string) bool {
 
 func isEntireHook(command string) bool {
 	for _, prefix := range entireHookPrefixes {
-		if strings.HasPrefix(command, prefix) {
+		if strings.Contains(command, prefix) {
 			return true
 		}
 	}

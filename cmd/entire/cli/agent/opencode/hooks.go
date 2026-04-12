@@ -58,6 +58,7 @@ func (a *OpenCodeAgent) InstallHooks(ctx context.Context, localDev bool, force b
 
 	// Generate plugin content from template
 	content := strings.ReplaceAll(pluginTemplate, entireCmdPlaceholder, cmdPrefix)
+	content = strings.ReplaceAll(content, entireWarningPlaceholder, agent.MissingEntireWarning(agent.WarningFormatSingleLine))
 
 	// Check if already installed with identical content (idempotent) unless force
 	if !force {
