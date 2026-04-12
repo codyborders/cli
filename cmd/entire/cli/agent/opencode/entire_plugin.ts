@@ -6,7 +6,6 @@ import type { Plugin } from "@opencode-ai/plugin"
 
 export const EntirePlugin: Plugin = async ({ directory }) => {
   const ENTIRE_CMD = '__ENTIRE_CMD__'
-  const ENTIRE_NOT_INSTALLED_WARNING = '__ENTIRE_NOT_INSTALLED_WARNING__'
   // Track seen user messages to fire turn-start only once per message
   const seenUserMessages = new Set<string>()
   // Track current session ID for message events (which don't include sessionID)
@@ -26,17 +25,6 @@ export const EntirePlugin: Plugin = async ({ directory }) => {
       return ["sh", "-c", `${ENTIRE_CMD} hooks opencode ${hookName}`]
     }
     return ["sh", "-c", `if ! command -v entire >/dev/null 2>&1; then exit 0; fi; exec entire hooks opencode ${hookName}`]
-  }
-
-  function sessionStartHookCmd(): string[] {
-    if (ENTIRE_CMD !== "entire") {
-      return hookCmd("session-start")
-    }
-    return [
-      "sh",
-      "-c",
-      `if ! command -v entire >/dev/null 2>&1; then echo "${ENTIRE_NOT_INSTALLED_WARNING}" >&2; exit 0; fi; exec entire hooks opencode session-start`,
-    ]
   }
 
   /**
@@ -93,11 +81,11 @@ export const EntirePlugin: Plugin = async ({ directory }) => {
               const json = JSON.stringify({
                 session_id: session.id,
               })
-              const proc = Bun.spawn(sessionStartHookCmd(), {
+              const proc = Bun.spawn(hookCmd("session-start"), {
                 cwd: directory,
                 stdin: new Blob([json + "\n"]),
                 stdout: "ignore",
-                stderr: "inherit",
+                stderr: "ignore",
               })
               await proc.exited
             }

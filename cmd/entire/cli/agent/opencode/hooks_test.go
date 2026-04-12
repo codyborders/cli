@@ -40,9 +40,6 @@ func TestInstallHooks_FreshInstall(t *testing.T) {
 	if !strings.Contains(content, `const ENTIRE_CMD = 'entire'`) {
 		t.Error("plugin file does not contain production command constant")
 	}
-	if !strings.Contains(content, `const ENTIRE_NOT_INSTALLED_WARNING = 'Powered by Entire: Tracking is enabled, but the Entire CLI is not installed or not on PATH. Installation guide: https://docs.entire.io/cli/installation#installation-methods'`) {
-		t.Error("plugin file does not contain the missing-entire warning constant")
-	}
 	if !strings.Contains(content, "hooks opencode") {
 		t.Error("plugin file does not contain 'hooks opencode'")
 	}
@@ -121,7 +118,7 @@ func TestInstallHooks_SessionStartIsGuardedBySessionSwitch(t *testing.T) {
 
 	content := string(data)
 	guard := "if (currentSessionID !== session.id) {"
-	hook := "const proc = Bun.spawn(sessionStartHookCmd(), {"
+	hook := `const proc = Bun.spawn(hookCmd("session-start"), {`
 	currentSessionAssignment := "currentSessionID = session.id"
 
 	guardIdx := strings.Index(content, guard)
@@ -141,8 +138,8 @@ func TestInstallHooks_SessionStartIsGuardedBySessionSwitch(t *testing.T) {
 		t.Fatalf("expected guarded session-start call before session assignment, got guard=%d hook=%d assignment=%d",
 			guardIdx, hookIdx, assignIdx)
 	}
-	if !strings.Contains(content, `if ! command -v entire >/dev/null 2>&1; then echo "${ENTIRE_NOT_INSTALLED_WARNING}" >&2; exit 0; fi; exec entire hooks opencode session-start`) {
-		t.Fatal("plugin file missing wrapped production session-start command")
+	if !strings.Contains(content, `if ! command -v entire >/dev/null 2>&1; then exit 0; fi; exec entire hooks opencode ${hookName}`) {
+		t.Fatal("plugin file missing silent production hook command")
 	}
 }
 
