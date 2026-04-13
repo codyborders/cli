@@ -116,9 +116,9 @@ func fallbackToolUseStatePath(ctx context.Context, sessionID string) (string, er
 }
 
 func loadFallbackToolUseState(path string) (*fallbackToolUseState, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read fallback tool_use_id state: %w", err)
 	}
 
 	var state fallbackToolUseState

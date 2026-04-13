@@ -8,7 +8,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
-	"github.com/entireio/cli/cmd/entire/cli/testutil"
+	git "github.com/go-git/go-git/v6"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,7 +217,9 @@ func TestParseHookEvent_SubagentEnd_StringToolResponse(t *testing.T) {
 
 func TestParseHookEvent_MissingToolUseID_RepeatedInputsStayUniqueAndCorrelate(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.InitRepo(t, repoDir)
+	if _, err := git.PlainInit(repoDir, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
 	t.Chdir(repoDir)
 	paths.ClearWorktreeRootCache()
 	t.Cleanup(paths.ClearWorktreeRootCache)
