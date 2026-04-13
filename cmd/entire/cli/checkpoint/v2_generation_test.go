@@ -10,6 +10,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/redact"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -23,7 +24,7 @@ func TestReadGeneration_EmptyTree_ReturnsDefault(t *testing.T) {
 	store := NewV2GitStore(repo, "origin")
 
 	// Build an empty tree
-	emptyTree, err := BuildTreeFromEntries(repo, map[string]object.TreeEntry{})
+	emptyTree, err := BuildTreeFromEntries(context.Background(), repo, map[string]object.TreeEntry{})
 	require.NoError(t, err)
 
 	gen, err := store.readGeneration(emptyTree)
@@ -48,7 +49,7 @@ func TestReadGeneration_ParsesJSON(t *testing.T) {
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, store.writeGeneration(original, entries))
 
-	treeHash, err := BuildTreeFromEntries(repo, entries)
+	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
 	// Read it back
@@ -78,7 +79,7 @@ func TestWriteGeneration_RoundTrips(t *testing.T) {
 	assert.True(t, ok)
 
 	// Build tree and read back
-	treeHash, err := BuildTreeFromEntries(repo, entries)
+	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
 	gen, err := store.readGeneration(treeHash)
@@ -102,7 +103,7 @@ func TestReadGenerationFromRef(t *testing.T) {
 
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, store.writeGeneration(gen, entries))
-	treeHash, err := BuildTreeFromEntries(repo, entries)
+	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
 	refName := plumbing.ReferenceName(paths.V2FullCurrentRefName)
@@ -131,7 +132,7 @@ func TestAddGenerationJSONToTree(t *testing.T) {
 		Mode: 0o100644,
 		Hash: plumbing.ZeroHash, // dummy
 	}
-	rootTreeHash, err := BuildTreeFromEntries(repo, shardEntries)
+	rootTreeHash, err := BuildTreeFromEntries(context.Background(), repo, shardEntries)
 	require.NoError(t, err)
 
 	gen := GenerationMetadata{
@@ -190,7 +191,7 @@ func TestCountCheckpointsInTree_CountsShardDirectories(t *testing.T) {
 			SessionID:    "test-session",
 			Strategy:     "manual-commit",
 			Agent:        agent.AgentTypeClaudeCode,
-			Transcript:   []byte(`{"type":"test"}`),
+			Transcript:   redact.AlreadyRedacted([]byte(`{"type":"test"}`)),
 			AuthorName:   "Test",
 			AuthorEmail:  "test@test.com",
 		})
@@ -218,7 +219,7 @@ func TestWriteCommittedFull_NoGenerationJSON(t *testing.T) {
 		SessionID:    "session-gen-001",
 		Strategy:     "manual-commit",
 		Agent:        agent.AgentTypeClaudeCode,
-		Transcript:   []byte(`{"type":"assistant","message":"hello"}`),
+		Transcript:   redact.AlreadyRedacted([]byte(`{"type":"assistant","message":"hello"}`)),
 		AuthorName:   "Test",
 		AuthorEmail:  "test@test.com",
 	})
@@ -250,7 +251,7 @@ func TestUpdateCommitted_DoesNotAddGenerationJSON(t *testing.T) {
 		SessionID:    "session-noupdate-gen",
 		Strategy:     "manual-commit",
 		Agent:        agent.AgentTypeClaudeCode,
-		Transcript:   []byte(`{"type":"assistant","message":"initial"}`),
+		Transcript:   redact.AlreadyRedacted([]byte(`{"type":"assistant","message":"initial"}`)),
 		Prompts:      []string{"first"},
 		AuthorName:   "Test",
 		AuthorEmail:  "test@test.com",
@@ -261,7 +262,7 @@ func TestUpdateCommitted_DoesNotAddGenerationJSON(t *testing.T) {
 	err = store.UpdateCommitted(ctx, UpdateCommittedOptions{
 		CheckpointID: cpID,
 		SessionID:    "session-noupdate-gen",
-		Transcript:   []byte(`{"type":"assistant","message":"finalized"}`),
+		Transcript:   redact.AlreadyRedacted([]byte(`{"type":"assistant","message":"finalized"}`)),
 		Prompts:      []string{"first", "second"},
 		Agent:        agent.AgentTypeClaudeCode,
 	})
@@ -292,7 +293,7 @@ func createArchivedRef(t *testing.T, repo *git.Repository, number int) {
 	}
 	entries := make(map[string]object.TreeEntry)
 	require.NoError(t, store.writeGeneration(gen, entries))
-	treeHash, err := BuildTreeFromEntries(repo, entries)
+	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
 	authorName, authorEmail := GetGitAuthorFromRepo(repo)
@@ -332,7 +333,7 @@ func TestListArchivedGenerations_ExcludesCurrent(t *testing.T) {
 	store := NewV2GitStore(repo, "origin")
 
 	// Create /full/current ref
-	require.NoError(t, store.ensureRef(plumbing.ReferenceName(paths.V2FullCurrentRefName)))
+	require.NoError(t, store.ensureRef(context.Background(), plumbing.ReferenceName(paths.V2FullCurrentRefName)))
 
 	// Create an archived ref
 	createArchivedRef(t, repo, 1)
@@ -378,7 +379,7 @@ func populateFullCurrent(t *testing.T, store *V2GitStore, n, offset int) []id.Ch
 			SessionID:    fmt.Sprintf("session-rot-%d", offset+i),
 			Strategy:     "manual-commit",
 			Agent:        agent.AgentTypeClaudeCode,
-			Transcript:   []byte(fmt.Sprintf(`{"cp":%d}`, i)),
+			Transcript:   redact.AlreadyRedacted([]byte(fmt.Sprintf(`{"cp":%d}`, i))),
 			AuthorName:   "Test",
 			AuthorEmail:  "test@test.com",
 		})
@@ -497,7 +498,7 @@ func TestReadGeneration_BackwardCompatible(t *testing.T) {
 			Hash: blobHash,
 		},
 	}
-	treeHash, err := BuildTreeFromEntries(repo, entries)
+	treeHash, err := BuildTreeFromEntries(context.Background(), repo, entries)
 	require.NoError(t, err)
 
 	// Should parse without error, ignoring the unknown checkpoints field
