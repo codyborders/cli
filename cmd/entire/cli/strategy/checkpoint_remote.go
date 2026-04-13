@@ -301,6 +301,15 @@ func getRemoteURL(ctx context.Context, remoteName string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// OriginURL returns the URL configured for the "origin" remote.
+// Exported so callers outside this package can fetch by URL instead of by
+// remote name, which avoids git persisting partial-clone config
+// (remote.origin.promisor, remote.origin.partialclonefilter) when --filter
+// is used.
+func OriginURL(ctx context.Context) (string, error) {
+	return getRemoteURL(ctx, "origin")
+}
+
 // redactURL removes credentials from a URL for safe logging.
 // Handles both HTTPS URLs with embedded credentials and general URLs.
 func redactURL(rawURL string) string {
