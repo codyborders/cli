@@ -51,7 +51,7 @@ func (f *FactoryAIDroidAgent) HookNames() []string {
 
 // ParseHookEvent translates a Factory AI Droid hook into a normalized lifecycle Event.
 // Returns nil if the hook has no lifecycle significance.
-func (f *FactoryAIDroidAgent) ParseHookEvent(_ context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
+func (f *FactoryAIDroidAgent) ParseHookEvent(ctx context.Context, hookName string, stdin io.Reader) (*agent.Event, error) {
 	switch hookName {
 	case HookNameSessionStart:
 		return f.parseSessionStart(stdin)
@@ -62,9 +62,9 @@ func (f *FactoryAIDroidAgent) ParseHookEvent(_ context.Context, hookName string,
 	case HookNameSessionEnd:
 		return f.parseSessionEnd(stdin)
 	case HookNamePreToolUse:
-		return f.parseSubagentStart(stdin)
+		return f.parseSubagentStart(ctx, stdin)
 	case HookNamePostToolUse:
-		return f.parseSubagentEnd(stdin)
+		return f.parseSubagentEnd(ctx, stdin)
 	case HookNamePreCompact:
 		return f.parseCompaction(stdin)
 	case HookNameSubagentStop, HookNameNotification:
@@ -227,14 +227,17 @@ func (f *FactoryAIDroidAgent) parseSessionEnd(stdin io.Reader) (*agent.Event, er
 	}, nil
 }
 
-func (f *FactoryAIDroidAgent) parseSubagentStart(stdin io.Reader) (*agent.Event, error) {
+func (f *FactoryAIDroidAgent) parseSubagentStart(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	raw, err := agent.ReadAndParseHookInput[taskHookInputRaw](stdin)
 	if err != nil {
 		return nil, err
 	}
 	toolUseID := raw.ToolUseID
 	if toolUseID == "" {
-		toolUseID = fallbackToolUseID(raw.SessionID, raw.ToolName, raw.ToolInput)
+		toolUseID, err = registerFallbackToolUseID(ctx, raw.SessionID, raw.ToolName, raw.ToolInput)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &agent.Event{
 		Type:       agent.SubagentStart,
@@ -246,14 +249,17 @@ func (f *FactoryAIDroidAgent) parseSubagentStart(stdin io.Reader) (*agent.Event,
 	}, nil
 }
 
-func (f *FactoryAIDroidAgent) parseSubagentEnd(stdin io.Reader) (*agent.Event, error) {
+func (f *FactoryAIDroidAgent) parseSubagentEnd(ctx context.Context, stdin io.Reader) (*agent.Event, error) {
 	raw, err := agent.ReadAndParseHookInput[postToolHookInputRaw](stdin)
 	if err != nil {
 		return nil, err
 	}
 	toolUseID := raw.ToolUseID
 	if toolUseID == "" {
-		toolUseID = fallbackToolUseID(raw.SessionID, raw.ToolName, raw.ToolInput)
+		toolUseID, err = resolveFallbackToolUseID(ctx, raw.SessionID, raw.ToolName, raw.ToolInput)
+		if err != nil {
+			return nil, err
+		}
 	}
 	event := &agent.Event{
 		Type:       agent.SubagentEnd,

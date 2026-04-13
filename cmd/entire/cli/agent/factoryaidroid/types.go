@@ -80,6 +80,11 @@ func fallbackToolUseID(sessionID, toolName string, toolInput json.RawMessage) st
 	return "factorytask_" + hex.EncodeToString(sum[:8])
 }
 
+func fallbackToolFingerprint(toolName string, toolInput json.RawMessage) string {
+	sum := sha256.Sum256([]byte(toolName + "\n" + string(toolInput)))
+	return hex.EncodeToString(sum[:16])
+}
+
 // Tool names used in Factory Droid transcripts.
 const (
 	ToolCreate       = "Create"

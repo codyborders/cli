@@ -2,10 +2,13 @@ package factoryaidroid
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -209,6 +212,53 @@ func TestParseHookEvent_SubagentEnd_StringToolResponse(t *testing.T) {
 	}
 	if event.ToolUseID == "" {
 		t.Fatal("expected fallback tool_use_id, got empty string")
+	}
+}
+
+func TestParseHookEvent_MissingToolUseID_RepeatedInputsStayUniqueAndCorrelate(t *testing.T) {
+	repoDir := t.TempDir()
+	testutil.InitRepo(t, repoDir)
+	t.Chdir(repoDir)
+	paths.ClearWorktreeRootCache()
+	t.Cleanup(paths.ClearWorktreeRootCache)
+
+	ag := &FactoryAIDroidAgent{}
+	input := `{"session_id": "sess-repeat", "transcript_path": "/tmp/t.jsonl", "tool_name": "Task", "tool_input": {"prompt": "do something"}}`
+
+	startOne, err := ag.ParseHookEvent(context.Background(), HookNamePreToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error on first start: %v", err)
+	}
+	startTwo, err := ag.ParseHookEvent(context.Background(), HookNamePreToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error on second start: %v", err)
+	}
+	if startOne.ToolUseID == startTwo.ToolUseID {
+		t.Fatalf("expected unique fallback tool_use_id values, got %q", startOne.ToolUseID)
+	}
+
+	endTwo, err := ag.ParseHookEvent(context.Background(), HookNamePostToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error on second end: %v", err)
+	}
+	if endTwo.ToolUseID != startTwo.ToolUseID {
+		t.Fatalf("expected most recent fallback tool_use_id %q, got %q", startTwo.ToolUseID, endTwo.ToolUseID)
+	}
+
+	endOne, err := ag.ParseHookEvent(context.Background(), HookNamePostToolUse, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error on first end: %v", err)
+	}
+	if endOne.ToolUseID != startOne.ToolUseID {
+		t.Fatalf("expected earlier fallback tool_use_id %q, got %q", startOne.ToolUseID, endOne.ToolUseID)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(repoDir, paths.EntireTmpDir, fallbackToolUseStatePrefix+"*.json"))
+	if err != nil {
+		t.Fatalf("glob fallback state files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected fallback state cleanup, found %v", matches)
 	}
 }
 
