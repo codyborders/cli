@@ -411,7 +411,7 @@ func (s *V2GitStore) fetchRemoteFullRefs(ctx context.Context) error {
 
 // readTranscriptFromRef reads the raw transcript from a specific /full/* ref.
 // Follows the same chunking convention as readTranscriptFromTree in committed.go:
-// chunk 0 is the base file (full.jsonl), chunks 1+ are full.jsonl.001, .002, etc.
+// chunk 0 is the base file (raw_transcript), chunks 1+ are raw_transcript.001, .002, etc.
 // When chunk files exist, all chunks (including chunk 0) are reassembled using
 // agent-aware reassembly via agent.ReassembleTranscript.
 func (s *V2GitStore) readTranscriptFromRef(refName plumbing.ReferenceName, sessionPath string, agentType types.AgentType) ([]byte, error) {

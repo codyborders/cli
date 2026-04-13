@@ -283,7 +283,7 @@ func TestV2GitStore_WriteCommittedMain_ExcludesTranscript(t *testing.T) {
 	tree := v2MainTree(t, repo)
 	cpPath := cpID.Path()
 
-	// full.jsonl should NOT be in the /main tree
+	// raw_transcript should NOT be in the /main tree
 	cpTree, err := tree.Tree(cpPath)
 	require.NoError(t, err)
 
@@ -391,7 +391,7 @@ func TestV2GitStore_WriteCommittedMain_UsesCompactTranscriptStart(t *testing.T) 
 		Prompts:                   []string{"hello"},
 		AuthorName:                "Test",
 		AuthorEmail:               "test@test.com",
-		CheckpointTranscriptStart: 42, // full.jsonl offset (must not be used in v2 metadata)
+		CheckpointTranscriptStart: 42, // raw_transcript offset (must not be used in v2 metadata)
 		CompactTranscriptStart:    15, // transcript.jsonl offset (must be used in v2 metadata)
 	})
 	require.NoError(t, err)
