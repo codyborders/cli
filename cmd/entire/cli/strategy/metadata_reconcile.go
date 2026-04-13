@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -193,6 +194,97 @@ func ReconcileDisconnectedMetadataBranch(
 
 	fmt.Fprintln(w, "[entire] Done — all local and remote checkpoints preserved")
 	return nil
+}
+
+// v2DoctorTmpRef is the temporary ref used by doctor to fetch and compare the remote v2 /main.
+const v2DoctorTmpRef = "refs/entire/tmp/doctor-v2-main"
+
+// IsV2MainDisconnected checks whether the local v2 /main ref and the remote
+// v2 /main ref exist but share no common ancestor. Uses git ls-remote to
+// discover the remote ref (custom refs don't have remote-tracking refs).
+//
+// remote is the git remote URL or path to check against.
+// Returns (false, nil) if either ref doesn't exist or they share ancestry.
+func IsV2MainDisconnected(ctx context.Context, repo *git.Repository, remote string) (bool, error) {
+	refName := plumbing.ReferenceName(paths.V2MainRefName)
+
+	localRef, err := repo.Reference(refName, true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check local v2 /main ref: %w", err)
+	}
+
+	repoPath, err := getRepoPath(repo)
+	if err != nil {
+		return false, err
+	}
+
+	remoteHash, err := lsRemoteRef(ctx, repoPath, remote, paths.V2MainRefName)
+	if err != nil {
+		return false, fmt.Errorf("failed to ls-remote v2 /main: %w", err)
+	}
+	if remoteHash == plumbing.ZeroHash {
+		return false, nil // Remote doesn't have the ref
+	}
+
+	if localRef.Hash() == remoteHash {
+		return false, nil
+	}
+
+	// Fetch remote ref to temporary local ref for merge-base check
+	if fetchErr := fetchRefToTemp(ctx, repoPath, remote, paths.V2MainRefName, v2DoctorTmpRef); fetchErr != nil {
+		return false, fmt.Errorf("failed to fetch remote v2 /main: %w", fetchErr)
+	}
+	defer cleanupTmpRef(repo)
+
+	return isDisconnected(ctx, repoPath, localRef.Hash().String(), remoteHash.String())
+}
+
+// lsRemoteRef runs git ls-remote and returns the hash for a specific ref.
+// Returns plumbing.ZeroHash if the ref doesn't exist on the remote.
+func lsRemoteRef(ctx context.Context, repoPath, remote, refName string) (plumbing.Hash, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", remote, refName)
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("git ls-remote failed: %w", err)
+	}
+
+	line := strings.TrimSpace(string(output))
+	if line == "" {
+		return plumbing.ZeroHash, nil
+	}
+
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
+		return plumbing.ZeroHash, nil
+	}
+
+	return plumbing.NewHash(parts[0]), nil
+}
+
+// fetchRefToTemp fetches a remote ref to a temporary local ref for comparison.
+func fetchRefToTemp(ctx context.Context, repoPath, remote, srcRef, dstRef string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	refspec := fmt.Sprintf("+%s:%s", srcRef, dstRef)
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--no-tags", remote, refspec)
+	cmd.Dir = repoPath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch failed: %s: %w", output, err)
+	}
+	return nil
+}
+
+// cleanupTmpRef deletes the temporary ref used by doctor checks.
+func cleanupTmpRef(repo *git.Repository) {
+	_ = repo.Storer.RemoveReference(plumbing.ReferenceName(v2DoctorTmpRef))
 }
 
 // isDisconnected checks if two commits have no common ancestor using git merge-base.
