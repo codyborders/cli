@@ -255,7 +255,7 @@ func TestV2GitStore_WriteCommittedMain_WritesPrompts(t *testing.T) {
 	assert.Contains(t, promptContent, "do the thing")
 	assert.Contains(t, promptContent, "also this")
 
-	// content_hash.txt should NOT be on /main — it lives on /full/current
+	// raw_transcript_hash.txt should NOT be on /main — it lives on /full/current
 	mainSessionTree, err := tree.Tree(cpPath + "/0")
 	require.NoError(t, err)
 	_, err = mainSessionTree.File(paths.V2RawTranscriptHashFileName)
