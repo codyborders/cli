@@ -381,7 +381,7 @@ func EnsureMetadataBranch(repo *git.Repository) error {
 	if err != nil {
 		return fmt.Errorf("failed to store empty tree: %w", err)
 	}
-	emptyTreeHash, err = checkpoint.MaybeMergeMetadataBranchVercelConfig(repo, emptyTreeHash)
+	emptyTreeHash, err = vercelconfig.MaybeMergeMetadataBranchConfig(repo, emptyTreeHash)
 	if err != nil {
 		return fmt.Errorf("failed to initialize metadata branch vercel config: %w", err)
 	}

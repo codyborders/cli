@@ -1442,7 +1442,7 @@ func (s *GitStore) maybeMergeVercelConfig(ctx context.Context, rootTreeHash plum
 	if err := vercelconfig.InitSettings(ctx); err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("initialize vercel settings: %w", err)
 	}
-	return MaybeMergeMetadataBranchVercelConfig(s.repo, rootTreeHash)
+	return vercelconfig.MaybeMergeMetadataBranchConfig(s.repo, rootTreeHash)
 }
 
 // getFetchingTree returns a FetchingTree for the metadata branch.
