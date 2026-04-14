@@ -545,7 +545,13 @@ func checkV2GenerationHealth(cmd *cobra.Command, repo *git.Repository) error {
 				continue
 			}
 			if curr-prev > 1 {
-				warnings = append(warnings, fmt.Sprintf("INFO — gap in generation sequence (%013d missing)", prev+1))
+				first := prev + 1
+				last := curr - 1
+				if first == last {
+					warnings = append(warnings, fmt.Sprintf("INFO — gap in generation sequence (%013d missing)", first))
+				} else {
+					warnings = append(warnings, fmt.Sprintf("INFO — gap in generation sequence (%013d–%013d missing)", first, last))
+				}
 			}
 		}
 	}

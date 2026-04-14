@@ -690,7 +690,33 @@ func TestCheckV2GenerationHealth_SequenceGap(t *testing.T) {
 	err = checkV2GenerationHealth(cmd, repo)
 	require.Error(t, err)
 	assert.Contains(t, stdout.String(), "INFO")
-	assert.Contains(t, stdout.String(), "gap")
+	assert.Contains(t, stdout.String(), "0000000000002 missing")
+}
+
+func TestCheckV2GenerationHealth_SequenceGapRange(t *testing.T) {
+	t.Parallel()
+	dir := setupGitRepoForPhaseTest(t)
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	gen1 := &checkpoint.GenerationMetadata{
+		OldestCheckpointAt: now.Add(-72 * time.Hour),
+		NewestCheckpointAt: now.Add(-48 * time.Hour),
+	}
+	createArchivedGeneration(t, repo, 1, gen1, 3)
+
+	gen5 := &checkpoint.GenerationMetadata{
+		OldestCheckpointAt: now.Add(-24 * time.Hour),
+		NewestCheckpointAt: now,
+	}
+	createArchivedGeneration(t, repo, 5, gen5, 3)
+
+	cmd, stdout, _ := newTestCmd(t)
+
+	err = checkV2GenerationHealth(cmd, repo)
+	require.Error(t, err)
+	assert.Contains(t, stdout.String(), "0000000000002–0000000000004 missing")
 }
 
 // TestRunSessionsFix_MetadataCheckFailure_PropagatesError verifies that when
