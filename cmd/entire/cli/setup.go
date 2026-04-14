@@ -76,6 +76,21 @@ func hasStrategyFlags(cmd *cobra.Command) bool {
 	return cmd.Flags().Changed(flagCheckpointRemote) || cmd.Flags().Changed(flagSkipPushSessions)
 }
 
+// enableUsesSetupFlow reports whether `entire enable` should delegate to the
+// setup/configure flow instead of the lightweight re-enable path.
+// Bare `enable` and `enable --local/--project` remain state-toggle operations;
+// any other setup-mutating flag should share configure's behavior.
+func enableUsesSetupFlow(cmd *cobra.Command, agentName string) bool {
+	if agentName != "" || hasStrategyFlags(cmd) {
+		return true
+	}
+
+	return cmd.Flags().Changed("force") ||
+		cmd.Flags().Changed("local-dev") ||
+		cmd.Flags().Changed("absolute-git-hook-path") ||
+		cmd.Flags().Changed("telemetry")
+}
+
 // updateStrategyOptions applies strategy flags to settings without re-running agent setup.
 // Loads and writes only the target file to avoid leaking settings between layers.
 func updateStrategyOptions(ctx context.Context, w io.Writer, opts EnableOptions) error {
@@ -304,13 +319,17 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 	var errs []error
 
 	var addedAgents []agent.Agent
+	var reinstalledAgents []agent.Agent
 	for _, name := range selectedAgentNames {
-		if _, wasInstalled := installedSet[types.AgentName(name)]; wasInstalled {
-			continue
-		}
 		ag, err := agent.Get(types.AgentName(name))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to get agent %s: %w", name, err))
+			continue
+		}
+		if _, wasInstalled := installedSet[types.AgentName(name)]; wasInstalled {
+			if opts.ForceHooks {
+				reinstalledAgents = append(reinstalledAgents, ag)
+			}
 			continue
 		}
 		addedAgents = append(addedAgents, ag)
@@ -329,12 +348,12 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 		removedAgents = append(removedAgents, ag)
 	}
 
-	if len(addedAgents) == 0 && len(removedAgents) == 0 && len(errs) == 0 {
+	if len(addedAgents) == 0 && len(reinstalledAgents) == 0 && len(removedAgents) == 0 && len(errs) == 0 {
 		fmt.Fprintln(w, "No changes made.")
 		return nil
 	}
 	var installedAgents []agent.Agent
-	for _, ag := range addedAgents {
+	for _, ag := range append(addedAgents, reinstalledAgents...) {
 		if _, err := setupAgentHooks(ctx, w, ag, opts.LocalDev, opts.ForceHooks); err != nil {
 			errs = append(errs, fmt.Errorf("failed to setup %s hooks: %w", ag.Type(), err))
 		} else {
@@ -540,8 +559,16 @@ If Entire is already configured but disabled, this re-enables it.`,
 				return setupAgentHooksNonInteractive(ctx, cmd.OutOrStdout(), ag, opts)
 			}
 
-			// If already set up, apply any strategy flags then just enable
+			// Any setup-mutating flags should behave like `configure` on repos that
+			// are already set up. Bare `enable` remains the lightweight re-enable path.
 			if settings.IsSetUpAny(ctx) {
+				if enableUsesSetupFlow(cmd, agentName) {
+					if hasStrategyFlags(cmd) {
+						return updateStrategyOptions(ctx, cmd.OutOrStdout(), opts)
+					}
+					return runManageAgents(ctx, cmd.OutOrStdout(), opts, nil)
+				}
+
 				updatedStrategy := hasStrategyFlags(cmd)
 				if updatedStrategy {
 					if err := updateStrategyOptions(ctx, cmd.OutOrStdout(), opts); err != nil {

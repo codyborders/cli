@@ -950,6 +950,70 @@ func TestEnableCmd_AgentFlagEmptyValue(t *testing.T) {
 	}
 }
 
+func TestEnableUsesSetupFlow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		args      []string
+		agentName string
+		want      bool
+	}{
+		{name: "bare enable", args: nil, want: false},
+		{name: "project only", args: []string{"--project"}, want: false},
+		{name: "local only", args: []string{"--local"}, want: false},
+		{name: "force", args: []string{"--force"}, want: true},
+		{name: "local dev", args: []string{"--local-dev"}, want: true},
+		{name: "absolute hook path", args: []string{"--absolute-git-hook-path"}, want: true},
+		{name: "telemetry changed", args: []string{"--telemetry=false"}, want: true},
+		{name: "checkpoint remote", args: []string{"--checkpoint-remote", "github:org/repo"}, want: true},
+		{name: "skip push sessions", args: []string{"--skip-push-sessions"}, want: true},
+		{name: "agent flag", args: []string{"--agent", "claude-code"}, agentName: "claude-code", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newEnableCmd()
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+			cmd.SetArgs(tt.args)
+			if err := cmd.ParseFlags(tt.args); err != nil {
+				t.Fatalf("ParseFlags() error = %v", err)
+			}
+
+			if got := enableUsesSetupFlow(cmd, tt.agentName); got != tt.want {
+				t.Fatalf("enableUsesSetupFlow(%v, %q) = %v, want %v", tt.args, tt.agentName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnableCmd_ForceOnConfiguredRepo_UsesConfigureFlow(t *testing.T) {
+	setupTestRepo(t)
+	t.Setenv("ENTIRE_TEST_TTY", "0")
+	writeSettings(t, testSettingsEnabled)
+	writeClaudeHooksFixture(t)
+
+	cmd := newEnableCmd()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("enable --force error = %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Cannot show agent selection in non-interactive mode.") {
+		t.Fatalf("expected enable --force to route to configure flow, got: %s", output)
+	}
+	if strings.Contains(output, "Entire is already enabled.") {
+		t.Fatalf("expected enable --force to avoid the lightweight re-enable path, got: %s", output)
+	}
+}
+
 // Tests for canPromptInteractively
 
 func TestCanPromptInteractively_EnvVar_True(t *testing.T) {
@@ -1623,6 +1687,50 @@ func TestManageAgents_NoChanges(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "No changes made.") {
 		t.Errorf("Expected 'No changes made.' output, got: %s", buf.String())
+	}
+}
+
+func TestManageAgents_ForceReinstallsSelectedAgentHooks(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir and t.Setenv
+	setupTestRepo(t)
+	t.Setenv("ENTIRE_TEST_TTY", "1")
+	writeSettings(t, testSettingsEnabled)
+	writeClaudeHooksFixture(t)
+
+	// Simulate a stale or locally modified Entire-managed Claude hook.
+	modifiedHooksJSON := `{
+		"hooks": {
+			"Stop": [{"hooks": [{"type": "command", "command": "entire hooks claude-code stop --stale"}]}]
+		}
+	}`
+	if err := os.WriteFile(".claude/settings.json", []byte(modifiedHooksJSON), 0o644); err != nil {
+		t.Fatalf("Failed to mutate .claude/settings.json: %v", err)
+	}
+
+	selectFn := func(_ []string) ([]string, error) {
+		return []string{string(agent.AgentNameClaudeCode)}, nil
+	}
+
+	var buf bytes.Buffer
+	err := runManageAgents(context.Background(), &buf, EnableOptions{ForceHooks: true}, selectFn)
+	if err != nil {
+		t.Fatalf("runManageAgents() error = %v", err)
+	}
+
+	data, err := os.ReadFile(".claude/settings.json")
+	if err != nil {
+		t.Fatalf("Failed to read .claude/settings.json: %v", err)
+	}
+	content := string(data)
+
+	if strings.Contains(content, "stop --stale") {
+		t.Errorf("Expected force reinstall to rewrite stale Claude hook, got: %s", content)
+	}
+	if !strings.Contains(content, `"command": "entire hooks claude-code stop"`) {
+		t.Errorf("Expected force reinstall to restore canonical Claude hook, got: %s", content)
+	}
+	if strings.Contains(buf.String(), "No changes made.") {
+		t.Errorf("Force reinstall should not be treated as no-op, got: %s", buf.String())
 	}
 }
 
