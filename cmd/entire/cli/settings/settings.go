@@ -123,14 +123,6 @@ func Load(ctx context.Context) (*EntireSettings, error) {
 	return loadMergedSettings(settingsFileAbs, localSettingsFileAbs)
 }
 
-// LoadFromRepoRoot loads settings relative to a repository root path.
-func LoadFromRepoRoot(repoRoot string) (*EntireSettings, error) {
-	return loadMergedSettings(
-		filepath.Join(repoRoot, EntireSettingsFile),
-		filepath.Join(repoRoot, EntireSettingsLocalFile),
-	)
-}
-
 func loadMergedSettings(settingsFileAbs, localSettingsFileAbs string) (*EntireSettings, error) {
 	// Load base settings
 	settings, err := loadFromFile(settingsFileAbs)

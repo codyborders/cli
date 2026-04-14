@@ -24,6 +24,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/entireio/cli/cmd/entire/cli/validation"
+	"github.com/entireio/cli/cmd/entire/cli/vercelconfig"
 	"github.com/entireio/cli/cmd/entire/cli/versioninfo"
 	"github.com/entireio/cli/perf"
 	"github.com/entireio/cli/redact"
@@ -1437,7 +1438,10 @@ func (s *GitStore) ensureSessionsBranch(ctx context.Context) error {
 	return nil
 }
 
-func (s *GitStore) maybeMergeVercelConfig(_ context.Context, rootTreeHash plumbing.Hash) (plumbing.Hash, error) {
+func (s *GitStore) maybeMergeVercelConfig(ctx context.Context, rootTreeHash plumbing.Hash) (plumbing.Hash, error) {
+	if err := vercelconfig.InitSettings(ctx); err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("initialize vercel settings: %w", err)
+	}
 	return MaybeMergeMetadataBranchVercelConfig(s.repo, rootTreeHash)
 }
 

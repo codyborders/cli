@@ -416,7 +416,7 @@ func TestLoad_ExternalAgentsField(t *testing.T) {
 	}
 }
 
-func TestLoadFromRepoRoot_MergesLocalOverrides(t *testing.T) {
+func TestLoad_MergesLocalOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 	entireDir := filepath.Join(tmpDir, ".entire")
 	if err := os.MkdirAll(entireDir, 0o755); err != nil {
@@ -430,9 +430,15 @@ func TestLoadFromRepoRoot_MergesLocalOverrides(t *testing.T) {
 		t.Fatalf("failed to write settings.local.json: %v", err)
 	}
 
-	s, err := LoadFromRepoRoot(tmpDir)
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o755); err != nil {
+		t.Fatalf("failed to create .git directory: %v", err)
+	}
+
+	t.Chdir(tmpDir)
+
+	s, err := Load(context.Background())
 	if err != nil {
-		t.Fatalf("LoadFromRepoRoot() error = %v", err)
+		t.Fatalf("Load() error = %v", err)
 	}
 	if !s.Vercel {
 		t.Error("expected vercel to be true")

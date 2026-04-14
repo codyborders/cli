@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/vercelconfig"
 
 	"github.com/go-git/go-git/v6"
@@ -18,12 +17,7 @@ import (
 // Vercel deployment-disable rule when the repository has Vercel integration enabled.
 // Existing vercel.json content is preserved and merged when present.
 func MaybeMergeMetadataBranchVercelConfig(repo *git.Repository, rootTreeHash plumbing.Hash) (plumbing.Hash, error) {
-	worktree, worktreeErr := repo.Worktree()
-	if worktreeErr != nil {
-		return rootTreeHash, nil
-	}
-
-	projectSettings, settingsErr := settings.LoadFromRepoRoot(worktree.Filesystem.Root())
+	projectSettings, settingsErr := vercelconfig.CachedSettings()
 	if settingsErr != nil || !projectSettings.Vercel {
 		return rootTreeHash, nil
 	}

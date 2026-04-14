@@ -451,11 +451,15 @@ func setupBranchTestRepo(t *testing.T) (*git.Repository, plumbing.Hash) {
 }
 
 func TestEnsureSessionsBranch_WritesVercelConfigWhenEnabled(t *testing.T) {
+	vercelconfig.ResetSettingsCache()
+	t.Cleanup(vercelconfig.ResetSettingsCache)
+
 	repo, _ := setupBranchTestRepo(t)
 	worktree, err := repo.Worktree()
 	if err != nil {
 		t.Fatalf("repo.Worktree() error = %v", err)
 	}
+	t.Chdir(worktree.Filesystem.Root())
 
 	entireDir := filepath.Join(worktree.Filesystem.Root(), ".entire")
 	if err := os.MkdirAll(entireDir, 0o755); err != nil {
@@ -501,12 +505,16 @@ func TestEnsureSessionsBranch_WritesVercelConfigWhenEnabled(t *testing.T) {
 }
 
 func TestWriteCommitted_MergesVercelConfigOnMetadataBranch(t *testing.T) {
+	vercelconfig.ResetSettingsCache()
+	t.Cleanup(vercelconfig.ResetSettingsCache)
+
 	repo, _ := setupBranchTestRepo(t)
 	worktree, err := repo.Worktree()
 	if err != nil {
 		t.Fatalf("repo.Worktree() error = %v", err)
 	}
 	repoRoot := worktree.Filesystem.Root()
+	t.Chdir(repoRoot)
 
 	entireDir := filepath.Join(repoRoot, ".entire")
 	if err := os.MkdirAll(entireDir, 0o755); err != nil {
