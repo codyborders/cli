@@ -224,6 +224,14 @@ func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPr
 		return fmt.Errorf("not a git repository: %w", err)
 	}
 
+	// Fetch metadata branch from remote to ensure we can find checkpoints
+	// from other collaborators (same approach as `entire resume`).
+	// The treeless fetch (depth=1, blob:none) is cheap — git short-circuits
+	// if the ref is already up to date.
+	if _, freshRepo, fetchErr := getMetadataTree(ctx); fetchErr == nil {
+		repo = freshRepo
+	}
+
 	v1Store := checkpoint.NewGitStore(repo)
 	v2Store := checkpoint.NewV2GitStore(repo, strategy.ResolveCheckpointURL(ctx, "origin"))
 	preferCheckpointsV2 := settings.IsCheckpointsV2Enabled(ctx)
