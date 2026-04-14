@@ -1726,7 +1726,7 @@ func TestMaybePromptVercelDeploymentDisable_MergesExistingConfig(t *testing.T) {
 
 	var prompted bool
 	var buf bytes.Buffer
-	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, "", func() (bool, error) {
 		prompted = true
 		return true, nil
 	})
@@ -1757,7 +1757,7 @@ func TestMaybePromptVercelDeploymentDisable_CreatesConfigWhenVercelDetected(t *t
 	}
 
 	var buf bytes.Buffer
-	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, "", func() (bool, error) {
 		return true, nil
 	})
 	if err != nil {
@@ -1791,7 +1791,7 @@ func TestMaybePromptVercelDeploymentDisable_SkipsPromptWhenAlreadyDisabledInVerc
 
 	promptCalled := false
 	var buf bytes.Buffer
-	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, func() (bool, error) {
+	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, "", func() (bool, error) {
 		promptCalled = true
 		return true, nil
 	})
@@ -1814,6 +1814,49 @@ func TestMaybePromptVercelDeploymentDisable_SkipsPromptWhenAlreadyDisabledInVerc
 	}
 	if !projectSettings.Vercel {
 		t.Fatal("expected vercel setting to be enabled from existing vercel.json")
+	}
+}
+
+func TestMaybePromptVercelDeploymentDisable_WritesLocalSettingsWhenRequested(t *testing.T) {
+	setupTestRepo(t)
+
+	if err := os.MkdirAll(filepath.Dir(settings.EntireSettingsLocalFile), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	if err := os.WriteFile("vercel.json", []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write vercel.json: %v", err)
+	}
+
+	var buf bytes.Buffer
+	changed, err := maybePromptVercelDeploymentDisable(context.Background(), &buf, settings.EntireSettingsLocalFile, func() (bool, error) {
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("maybePromptVercelDeploymentDisable() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("expected Vercel setting change")
+	}
+	if !strings.Contains(buf.String(), settings.EntireSettingsLocalFile) {
+		t.Fatalf("expected local settings update output, got %q", buf.String())
+	}
+
+	localSettingsPath := filepath.Join(".", settings.EntireSettingsLocalFile)
+	localSettings, err := settings.LoadFromFile(localSettingsPath)
+	if err != nil {
+		t.Fatalf("load local settings: %v", err)
+	}
+	if !localSettings.Vercel {
+		t.Fatal("expected vercel setting in local settings")
+	}
+
+	projectSettingsPath := filepath.Join(".", settings.EntireSettingsFile)
+	projectSettings, err := settings.LoadFromFile(projectSettingsPath)
+	if err != nil {
+		t.Fatalf("load project settings: %v", err)
+	}
+	if projectSettings.Vercel {
+		t.Fatal("expected project settings to remain unchanged")
 	}
 }
 

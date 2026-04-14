@@ -145,6 +145,17 @@ func settingsTargetFile(ctx context.Context, useLocal, useProject bool) (string,
 	return settings.EntireSettingsFile, configDisplayProject
 }
 
+func saveSettingsToTarget(ctx context.Context, s *EntireSettings, targetFile string) error {
+	switch targetFile {
+	case settings.EntireSettingsLocalFile:
+		return SaveEntireSettingsLocal(ctx, s)
+	case settings.EntireSettingsFile:
+		return SaveEntireSettings(ctx, s)
+	default:
+		return fmt.Errorf("unknown settings target %q", targetFile)
+	}
+}
+
 // parseCheckpointRemoteFlag parses a "provider:owner/repo" string into its components.
 // Supported providers: "github".
 func parseCheckpointRemoteFlag(value string) (provider, repo string, err error) {
@@ -277,7 +288,7 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 
 	// Nothing selected and nothing installed — no-op.
 	if len(selectedAgentNames) == 0 && len(installedNames) == 0 {
-		changed, err := maybePromptVercelDeploymentDisable(ctx, w, nil)
+		changed, err := maybePromptVercelDeploymentDisable(ctx, w, "", nil)
 		if err != nil {
 			return err
 		}
@@ -337,7 +348,7 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 	}
 
 	if len(addedAgents) == 0 && len(removedAgents) == 0 && len(errs) == 0 {
-		changed, err := maybePromptVercelDeploymentDisable(ctx, w, nil)
+		changed, err := maybePromptVercelDeploymentDisable(ctx, w, "", nil)
 		if err != nil {
 			return err
 		}
@@ -413,7 +424,8 @@ func applyAgentChanges(ctx context.Context, w io.Writer, selectedAgentNames []st
 		}
 	}
 
-	if _, err := maybePromptVercelDeploymentDisable(ctx, w, nil); err != nil {
+	vercelSettingsTarget, _ := settingsTargetFile(ctx, opts.UseLocalSettings, opts.UseProjectSettings)
+	if _, err := maybePromptVercelDeploymentDisable(ctx, w, vercelSettingsTarget, nil); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -706,11 +718,12 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 	}
 
 	// Save settings to the appropriate file.
+	targetFile := EntireSettingsFile
+	if shouldUseLocal {
+		targetFile = EntireSettingsLocalFile
+	}
 	saveSettings := func() error {
-		if shouldUseLocal {
-			return SaveEntireSettingsLocal(ctx, settings)
-		}
-		return SaveEntireSettings(ctx, settings)
+		return saveSettingsToTarget(ctx, settings, targetFile)
 	}
 	if err := saveSettings(); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
@@ -730,7 +743,7 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 	}
 	fmt.Fprintf(w, "✓ Project configured (%s)\n", configDisplay)
 
-	if _, err := maybePromptVercelDeploymentDisable(ctx, w, nil); err != nil {
+	if _, err := maybePromptVercelDeploymentDisable(ctx, w, targetFile, nil); err != nil {
 		return err
 	}
 
@@ -1198,7 +1211,8 @@ func setupAgentHooksNonInteractive(ctx context.Context, w io.Writer, ag agent.Ag
 		settings.Telemetry = &f
 	}
 
-	if err := SaveEntireSettings(ctx, settings); err != nil {
+	targetFile, configDisplay := settingsTargetFile(ctx, opts.UseLocalSettings, opts.UseProjectSettings)
+	if err := saveSettingsToTarget(ctx, settings, targetFile); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
@@ -1223,9 +1237,9 @@ func setupAgentHooksNonInteractive(ctx context.Context, w io.Writer, ag agent.Ag
 		fmt.Fprintf(w, "%s\n", msg)
 	}
 
-	fmt.Fprintf(w, "✓ Project configured (%s)\n", configDisplayProject)
+	fmt.Fprintf(w, "✓ Project configured (%s)\n", configDisplay)
 
-	if _, err := maybePromptVercelDeploymentDisable(ctx, w, nil); err != nil {
+	if _, err := maybePromptVercelDeploymentDisable(ctx, w, targetFile, nil); err != nil {
 		return err
 	}
 
@@ -1509,7 +1523,7 @@ func promptTelemetryConsent(settings *EntireSettings, telemetryFlag bool) error 
 	return nil
 }
 
-func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, promptFn func() (bool, error)) (bool, error) {
+func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, targetFile string, promptFn func() (bool, error)) (bool, error) {
 	repoRoot, rootErr := paths.WorktreeRoot(ctx)
 	if rootErr == nil {
 		vercelJSONPath := filepath.Join(repoRoot, "vercel.json")
@@ -1541,22 +1555,31 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, prompt
 			return false, nil
 		}
 
-		projectSettingsPath := filepath.Join(repoRoot, settings.EntireSettingsFile)
-		projectSettings, err := settings.LoadFromFile(projectSettingsPath)
-		if err != nil {
-			return false, fmt.Errorf("load project settings: %w", err)
+		if targetFile == "" {
+			targetFile, _ = settingsTargetFile(ctx, false, false)
 		}
-		if projectSettings.Vercel {
+
+		configDisplay := configDisplayProject
+		if targetFile == settings.EntireSettingsLocalFile {
+			configDisplay = configDisplayLocal
+		}
+
+		targetSettingsPath := filepath.Join(repoRoot, targetFile)
+		targetSettings, err := settings.LoadFromFile(targetSettingsPath)
+		if err != nil {
+			return false, fmt.Errorf("load settings: %w", err)
+		}
+		if targetSettings.Vercel {
 			return false, nil
 		}
 
 		if config, alreadyDisabled, loadErr := vercelconfig.Load(vercelJSONPath, hasVercelJSON); loadErr == nil &&
 			config != nil && alreadyDisabled {
-			projectSettings.Vercel = true
-			if err := settings.Save(ctx, projectSettings); err != nil {
-				return false, fmt.Errorf("save project settings: %w", err)
+			targetSettings.Vercel = true
+			if err := saveSettingsToTarget(ctx, targetSettings, targetFile); err != nil {
+				return false, fmt.Errorf("save settings: %w", err)
 			}
-			fmt.Fprintf(w, "✓ Updated %s to manage Vercel deployment blocking on `%s`\n", configDisplayProject, vercelconfig.BranchPattern)
+			fmt.Fprintf(w, "✓ Updated %s to manage Vercel deployment blocking on `%s`\n", configDisplay, vercelconfig.BranchPattern)
 			return true, nil
 		}
 
@@ -1576,12 +1599,12 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, prompt
 			return false, nil
 		}
 
-		projectSettings.Vercel = true
-		if err := settings.Save(ctx, projectSettings); err != nil {
-			return false, fmt.Errorf("save project settings: %w", err)
+		targetSettings.Vercel = true
+		if err := saveSettingsToTarget(ctx, targetSettings, targetFile); err != nil {
+			return false, fmt.Errorf("save settings: %w", err)
 		}
 
-		fmt.Fprintf(w, "✓ Updated %s to manage Vercel deployment blocking on `%s`\n", configDisplayProject, vercelconfig.BranchPattern)
+		fmt.Fprintf(w, "✓ Updated %s to manage Vercel deployment blocking on `%s`\n", configDisplay, vercelconfig.BranchPattern)
 		return true, nil
 	}
 
