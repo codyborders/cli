@@ -71,16 +71,16 @@ type codexPayload struct {
 
 // compactCodex converts a Codex JSONL transcript into the compact format.
 func compactCodex(content []byte, opts MetadataFields) ([]byte, error) {
+	if opts.StartLine > 0 {
+		content = transcript.SliceFromLine(content, opts.StartLine)
+		if content == nil {
+			return []byte{}, nil
+		}
+	}
+
 	lines, err := parseCodexLines(content)
 	if err != nil {
 		return nil, err
-	}
-
-	if opts.StartLine > 0 {
-		lines = codexSliceFromResponseItem(lines, opts.StartLine)
-		if len(lines) == 0 {
-			return []byte{}, nil
-		}
 	}
 
 	base := newTranscriptLine(opts)
@@ -309,26 +309,6 @@ func codexAssistantText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(texts, "\n\n")
-}
-
-// codexSliceFromResponseItem returns a suffix of lines starting after skipping
-// n response_item entries. token_count lines do not count toward the offset.
-func codexSliceFromResponseItem(lines []codexLine, n int) []codexLine {
-	if n <= 0 {
-		return lines
-	}
-
-	seen := 0
-	for i, line := range lines {
-		if line.Type == codexTypeResponseItem {
-			seen++
-		}
-		if seen >= n {
-			return lines[i+1:]
-		}
-	}
-
-	return nil
 }
 
 // codexToolUseBlock builds a compact tool_use content block from a function_call.

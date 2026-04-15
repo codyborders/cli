@@ -3,11 +3,12 @@ package summarize
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 )
 
@@ -49,24 +50,23 @@ Guidelines:
 // to handle long transcripts without truncation.
 const DefaultModel = "sonnet"
 
+var defaultTextGeneratorFactory = func() (agent.TextGenerator, error) {
+	textGenerator, ok := agent.AsTextGenerator(claudecode.NewClaudeCodeAgent())
+	if !ok {
+		return nil, errors.New("default summarizer does not support text generation")
+	}
+	return textGenerator, nil
+}
+
 // ClaudeGenerator generates summaries using the Claude CLI.
 type ClaudeGenerator struct {
-	// ClaudePath is the path to the claude CLI executable.
-	// If empty, defaults to "claude" (expects it to be in PATH).
-	ClaudePath string
+	// TextGenerator is the primitive used to obtain raw model output.
+	// If nil, uses the built-in Claude Code text generator.
+	TextGenerator agent.TextGenerator
 
 	// Model is the Claude model to use for summarization.
 	// If empty, defaults to DefaultModel ("sonnet").
 	Model string
-
-	// CommandRunner allows injection of the command execution for testing.
-	// If nil, uses exec.CommandContext directly.
-	CommandRunner func(ctx context.Context, name string, args ...string) *exec.Cmd
-}
-
-// claudeCLIResponse represents the JSON response from the Claude CLI.
-type claudeCLIResponse struct {
-	Result string `json:"result"`
 }
 
 // Generate creates a summary from checkpoint data by calling the Claude CLI.
@@ -77,39 +77,26 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, input Input) (*checkpoin
 	// Build the prompt
 	prompt := buildSummarizationPrompt(transcriptText)
 
-	// Execute the Claude CLI
-	runner := g.CommandRunner
-	if runner == nil {
-		runner = exec.CommandContext
-	}
-
-	claudePath := g.ClaudePath
-	if claudePath == "" {
-		claudePath = "claude"
-	}
-
 	model := g.Model
 	if model == "" {
 		model = DefaultModel
 	}
 
-	// Use empty --setting-sources to skip all settings (user, project, local).
-	// This avoids loading MCP servers, hooks, or other config that could interfere
-	// with a simple --print summarization call.
-	args := []string{"--print", "--output-format", "json", "--model", model, "--setting-sources", ""}
-	stdoutText, err := agent.RunIsolatedTextGeneratorCLI(ctx, runner, claudePath, "claude", args, prompt)
+	textGenerator := g.TextGenerator
+	if textGenerator == nil {
+		var err error
+		textGenerator, err = defaultTextGeneratorFactory()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	resultJSON, err := textGenerator.GenerateText(ctx, prompt, model)
 	if err != nil {
-		return nil, fmt.Errorf("claude summary generation failed: %w", err)
+		return nil, fmt.Errorf("failed to generate summary text: %w", err)
 	}
 
-	// Parse the CLI response
-	var cliResponse claudeCLIResponse
-	if err := json.Unmarshal([]byte(stdoutText), &cliResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse claude CLI response: %w", err)
-	}
-
-	// The result field contains the actual JSON summary
-	return parseSummaryText(cliResponse.Result)
+	return parseSummaryText(resultJSON)
 }
 
 // buildSummarizationPrompt creates the prompt for the Claude CLI.

@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 
@@ -19,22 +18,24 @@ func (c *ClaudeCodeAgent) GenerateText(ctx context.Context, prompt string, model
 		model = "haiku"
 	}
 
+	commandRunner := c.CommandRunner
+	if commandRunner == nil {
+		commandRunner = exec.CommandContext
+	}
+
 	args := []string{
 		"--print", "--output-format", "json",
 		"--model", model, "--setting-sources", "",
 	}
-	stdoutText, err := agent.RunIsolatedTextGeneratorCLI(ctx, exec.CommandContext, claudePath, "claude", args, prompt)
+	stdoutText, err := agent.RunIsolatedTextGeneratorCLI(ctx, commandRunner, claudePath, "claude", args, prompt)
 	if err != nil {
 		return "", fmt.Errorf("claude text generation failed: %w", err)
 	}
 
-	// Parse the {"result": "..."} envelope
-	var response struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(stdoutText), &response); err != nil {
+	result, err := parseGenerateTextResponse([]byte(stdoutText))
+	if err != nil {
 		return "", fmt.Errorf("failed to parse claude CLI response: %w", err)
 	}
 
-	return response.Result, nil
+	return result, nil
 }
