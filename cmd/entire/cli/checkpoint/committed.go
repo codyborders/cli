@@ -1732,6 +1732,21 @@ func GetGitAuthorFromRepo(repo *git.Repository) (name, email string) {
 		email = cfg.User.Email
 	}
 
+	// If not found in local config, try global config
+	if name == "" || email == "" {
+		//nolint:staticcheck // the v6 is not yet released, revisit once it is.
+		globalCfg, err := config.LoadConfig(config.GlobalScope)
+		if err == nil {
+			if name == "" {
+				name = globalCfg.User.Name
+			}
+			if email == "" {
+				email = globalCfg.User.Email
+			}
+		}
+	}
+
+	// Provide sensible defaults if git user is not configured
 	if name == "" {
 		name = "Unknown"
 	}
@@ -1782,11 +1797,12 @@ func CreateCommit(ctx context.Context, repo *git.Repository, treeHash, parentHas
 // If no signer is registered, signing is disabled via settings, or signing fails,
 // the commit is left unsigned and the error is logged.
 func SignCommitBestEffort(ctx context.Context, commit *object.Commit) {
-	if !settings.IsSignCheckpointCommitsEnabled(ctx) {
+	// Check plugin availability first (in-memory) before hitting disk for settings.
+	if !plugin.Has(plugin.ObjectSigner()) {
 		return
 	}
 
-	if !plugin.Has(plugin.ObjectSigner()) {
+	if !settings.IsSignCheckpointCommitsEnabled(ctx) {
 		return
 	}
 
@@ -1811,6 +1827,7 @@ func SignCommitBestEffort(ctx context.Context, commit *object.Commit) {
 		logging.Warn(ctx, "failed to read encoded commit", slog.String("error", err.Error()))
 		return
 	}
+	defer r.Close()
 
 	sig, err := signer.Sign(r)
 	if err != nil {

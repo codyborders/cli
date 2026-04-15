@@ -908,7 +908,7 @@ func TestV2GitStore_UpdateCommitted_PreservesExistingTaskMetadataInFullCurrent(t
 	require.NoError(t, err)
 
 	authorName, authorEmail := GetGitAuthorFromRepo(repo)
-	commitHash, err := CreateCommit(repo, newRootHash, parentHash,
+	commitHash, err := CreateCommit(ctx, repo, newRootHash, parentHash,
 		fmt.Sprintf("Checkpoint: %s (task metadata)\n", cpID), authorName, authorEmail)
 	require.NoError(t, err)
 	require.NoError(t, repo.Storer.SetReference(plumbing.NewHashReference(refName, commitHash)))
