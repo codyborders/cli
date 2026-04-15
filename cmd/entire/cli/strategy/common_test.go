@@ -1163,7 +1163,6 @@ func TestEnsureMetadataBranch(t *testing.T) {
 			t.Errorf("expected empty tree, got %d entries", len(tree.Entries))
 		}
 	})
-
 }
 
 func TestEnsureMetadataBranch_WritesVercelConfigWhenEnabled(t *testing.T) {

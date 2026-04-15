@@ -42,7 +42,7 @@ func InitSettings(ctx context.Context) error {
 
 	s, err := settings.Load(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("load settings: %w", err)
 	}
 
 	cachedSettingsMu.Lock()
@@ -72,6 +72,7 @@ func ResetSettingsCache() {
 
 // Load reads a Vercel config file if present.
 func Load(path string) (map[string]any, bool, error) {
+	//nolint:gosec // path is provided by repository-local callers and intentionally supports arbitrary locations in tests
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -136,7 +137,13 @@ func Marshal(config map[string]any) ([]byte, error) {
 // is enabled in cached settings. Existing vercel.json content is preserved.
 func MaybeMergeMetadataBranchConfig(repo *git.Repository, rootTreeHash plumbing.Hash) (plumbing.Hash, error) {
 	projectSettings, settingsErr := CachedSettings()
-	if settingsErr != nil || !projectSettings.Vercel {
+	if settingsErr != nil {
+		if errors.Is(settingsErr, errSettingsNotInitialized) {
+			return rootTreeHash, nil
+		}
+		return plumbing.ZeroHash, fmt.Errorf("get cached settings: %w", settingsErr)
+	}
+	if !projectSettings.Vercel {
 		return rootTreeHash, nil
 	}
 
