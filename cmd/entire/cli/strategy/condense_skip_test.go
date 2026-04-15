@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
@@ -110,6 +111,104 @@ func TestCondenseSession_DoesNotSkipWhenFilesTouchedButNoTranscript(t *testing.T
 	result, err := s.CondenseSession(context.Background(), repo, checkpointID, state, committedFiles)
 	require.NoError(t, err)
 	assert.False(t, result.Skipped, "should not skip when files are touched even without transcript")
+}
+
+func TestCondenseSessionByID_SkippedPreservesState(t *testing.T) {
+	dir := setupGitRepo(t)
+	t.Chdir(dir)
+
+	s := &ManualCommitStrategy{}
+	sessionID := "test-byid-skip"
+
+	// Create a metadata dir with NO transcript (empty dir)
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	// Write a dummy file so SaveStep has something to commit to the shadow branch
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dummy.txt"), []byte("x"), 0o644))
+
+	// SaveStep creates the shadow branch (so CondenseSessionByID gets past the
+	// hasShadowBranch check), but there's no transcript in the metadata dir.
+	err := s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{},
+		NewFiles:       []string{"dummy.txt"},
+		DeletedFiles:   []string{},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint without transcript",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	// Clear FilesTouched so the skip gate fires (no transcript + no files = skip)
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.Phase = session.PhaseIdle
+	state.FilesTouched = nil
+	require.NoError(t, s.saveSessionState(context.Background(), state))
+	originalStepCount := state.StepCount
+
+	// CondenseSessionByID should return nil (no error) but preserve state
+	err = s.CondenseSessionByID(context.Background(), sessionID)
+	require.NoError(t, err)
+
+	// State should be preserved — not zeroed, not deleted
+	state, err = s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, state, "session state should still exist after skipped condensation")
+	assert.Equal(t, originalStepCount, state.StepCount, "StepCount should be preserved when condensation is skipped")
+	assert.Equal(t, session.PhaseIdle, state.Phase, "Phase should be preserved when condensation is skipped")
+}
+
+func TestCondenseAndMarkFullyCondensed_SkippedMarksFullyCondensed(t *testing.T) {
+	dir := setupGitRepo(t)
+	t.Chdir(dir)
+
+	s := &ManualCommitStrategy{}
+	sessionID := "test-eager-skip"
+
+	// Create a metadata dir with NO transcript
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	require.NoError(t, os.MkdirAll(metadataDirAbs, 0o755))
+
+	// Write a dummy file so SaveStep has something to commit to the shadow branch
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dummy.txt"), []byte("x"), 0o644))
+
+	// SaveStep creates the shadow branch
+	err := s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{},
+		NewFiles:       []string{"dummy.txt"},
+		DeletedFiles:   []string{},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint without transcript",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	// Set phase to ENDED with no files (skip gate: no transcript + no files = skip)
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	now := time.Now()
+	state.Phase = session.PhaseEnded
+	state.EndedAt = &now
+	state.FilesTouched = nil
+	require.NoError(t, s.saveSessionState(context.Background(), state))
+
+	err = s.CondenseAndMarkFullyCondensed(context.Background(), sessionID)
+	require.NoError(t, err)
+
+	state, err = s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.True(t, state.FullyCondensed, "should be marked FullyCondensed when condensation is skipped")
+	assert.Equal(t, session.PhaseEnded, state.Phase, "Phase should remain ENDED")
 }
 
 // getHeadHash returns the HEAD commit hash as a string.

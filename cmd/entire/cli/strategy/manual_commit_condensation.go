@@ -398,6 +398,11 @@ func (s *ManualCommitStrategy) extractOrCreateSessionData(ctx context.Context, r
 		// (e.g., Codex subagent hooks omit it). The fallback resolution and
 		// skip gate in CondenseSession will attempt to locate the transcript
 		// via the agent's storage, or skip condensation if nothing is found.
+		logging.Warn(logging.WithComponent(ctx, "checkpoint"),
+			"no shadow branch and no transcript path, attempting fallback resolution",
+			slog.String("session_id", state.SessionID),
+			slog.String("agent_type", string(state.AgentType)),
+		)
 		return &ExtractedSessionData{
 			FilesTouched: state.FilesTouched,
 		}, nil
@@ -1159,6 +1164,13 @@ func (s *ManualCommitStrategy) CondenseSessionByID(ctx context.Context, sessionI
 		return fmt.Errorf("failed to condense session: %w", err)
 	}
 
+	if result.Skipped {
+		logging.Info(logCtx, "session condensation skipped (no transcript or files), state preserved",
+			slog.String("session_id", sessionID),
+		)
+		return nil
+	}
+
 	logging.Info(logCtx, "session condensed by ID",
 		slog.String("session_id", sessionID),
 		slog.String("checkpoint_id", result.CheckpointID.String()),
@@ -1272,6 +1284,16 @@ func (s *ManualCommitStrategy) CondenseAndMarkFullyCondensed(ctx context.Context
 			slog.String("error", err.Error()),
 		)
 		return nil // fail-open
+	}
+
+	if result.Skipped {
+		// No transcript or files — nothing to condense. Mark fully condensed
+		// so PostCommit doesn't keep retrying this empty session.
+		logging.Info(logCtx, "eager condense skipped (no transcript or files), marking fully condensed",
+			slog.String("session_id", sessionID),
+		)
+		state.FullyCondensed = true
+		return s.saveSessionState(ctx, state)
 	}
 
 	// Update state — keep Phase = ENDED (unlike CondenseSessionByID which sets IDLE)
