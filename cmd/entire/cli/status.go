@@ -25,8 +25,8 @@ import (
 )
 
 type headLinkage struct {
-	commitHash   string
-	checkpointID string
+	commitHash    string
+	checkpointIDs []string
 }
 
 func newStatusCmd() *cobra.Command {
@@ -467,10 +467,22 @@ func currentHeadLinkage(ctx context.Context) (string, headLinkage, error) {
 
 	head := headLinkage{commitHash: headRef.Hash().String()}
 	if checkpointIDs := trailers.ParseAllCheckpoints(commit.Message); len(checkpointIDs) > 0 {
-		head.checkpointID = checkpointIDs[0].String()
+		head.checkpointIDs = make([]string, 0, len(checkpointIDs))
+		for _, checkpointID := range checkpointIDs {
+			head.checkpointIDs = append(head.checkpointIDs, checkpointID.String())
+		}
 	}
 
 	return repoRoot, head, nil
+}
+
+func (h headLinkage) hasCheckpointID(checkpointID string) bool {
+	for _, candidate := range h.checkpointIDs {
+		if candidate == checkpointID {
+			return true
+		}
+	}
+	return false
 }
 
 func reconcileActiveSessionHeadDivergence(
@@ -488,7 +500,7 @@ func reconcileActiveSessionHeadDivergence(
 			continue
 		}
 
-		if !st.LastCheckpointID.IsEmpty() && head.checkpointID != "" && st.LastCheckpointID.String() == head.checkpointID {
+		if !st.LastCheckpointID.IsEmpty() && head.hasCheckpointID(st.LastCheckpointID.String()) {
 			st.BaseCommit = head.commitHash
 			st.AttributionBaseCommit = head.commitHash
 			if err := store.Save(ctx, st); err != nil {
@@ -497,8 +509,8 @@ func reconcileActiveSessionHeadDivergence(
 			continue
 		}
 
-		if head.checkpointID != "" {
-			warnings[st.SessionID] = "tracking diverged from current HEAD; HEAD links to checkpoint " + head.checkpointID
+		if len(head.checkpointIDs) > 0 {
+			warnings[st.SessionID] = "tracking diverged from current HEAD; HEAD links to checkpoint(s) " + strings.Join(head.checkpointIDs, ", ")
 			continue
 		}
 

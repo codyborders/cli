@@ -649,6 +649,61 @@ func TestWriteActiveSessions_ReconcilesKnownCheckpointAfterReset(t *testing.T) {
 	}
 }
 
+func TestWriteActiveSessions_ReconcilesKnownCheckpointAfterReset_MultiTrailerHead(t *testing.T) {
+	setupTestRepo(t)
+
+	repoDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+
+	testutil.WriteFile(t, repoDir, "tracked.txt", "checkpoint")
+	testutil.GitAdd(t, repoDir, "tracked.txt")
+	testutil.GitCommit(t, repoDir, "checkpoint commit")
+
+	testutil.WriteFile(t, repoDir, "tracked.txt", "checkpoint\nfollow-up")
+	testutil.GitAdd(t, repoDir, "tracked.txt")
+	testutil.GitCommit(t, repoDir, "follow-up commit\n\nEntire-Checkpoint: a1b2c3d4e5f6\nEntire-Checkpoint: b1c2d3e4f5a6")
+	headCommit := testutil.GetHeadHash(t, repoDir)
+
+	store, err := session.NewStateStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStateStore() error = %v", err)
+	}
+
+	now := time.Now()
+	state := &session.State{
+		SessionID:             "reset-reconcile-multi-trailer-session",
+		WorktreePath:          repoDir,
+		StartedAt:             now.Add(-10 * time.Minute),
+		BaseCommit:            strings.Repeat("a", 40),
+		AttributionBaseCommit: strings.Repeat("a", 40),
+		LastCheckpointID:      "b1c2d3e4f5a6",
+	}
+	if err := store.Save(context.Background(), state); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	var buf bytes.Buffer
+	sty := newStatusStyles(&buf)
+	writeActiveSessions(context.Background(), &buf, sty)
+
+	reloaded, err := store.Load(context.Background(), state.SessionID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.BaseCommit != headCommit {
+		t.Fatalf("BaseCommit = %q, want %q", reloaded.BaseCommit, headCommit)
+	}
+	if reloaded.AttributionBaseCommit != headCommit {
+		t.Fatalf("AttributionBaseCommit = %q, want %q", reloaded.AttributionBaseCommit, headCommit)
+	}
+
+	if strings.Contains(buf.String(), "tracking diverged from current HEAD") {
+		t.Fatalf("expected no divergence warning after matching a later HEAD trailer, got: %s", buf.String())
+	}
+}
+
 func TestWriteActiveSessions_WarnsWhenResetDivergesWithoutKnownCheckpoint(t *testing.T) {
 	setupTestRepo(t)
 
