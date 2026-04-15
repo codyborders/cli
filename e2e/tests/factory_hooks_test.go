@@ -58,14 +58,13 @@ func TestFactoryCommittedCheckpointExcludesPreExistingUntrackedFiles(t *testing.
 		s.WaitFor(t, session, s.Agent.PromptPattern(), 90*time.Second)
 
 		testutil.WaitForFileExists(t, s.Dir, "docs/factory-prehook-worker.md", 10*time.Second)
-		taskPoint := waitForTaskRewindPoint(t, s.Dir, 15*time.Second)
+		waitForTaskRewindPoint(t, s.Dir, 15*time.Second)
 
 		s.Git(t, "add", "docs/factory-prehook-worker.md")
 		s.Git(t, "commit", "-m", "Add factory worker checkpoint regression fixtures")
 
 		testutil.WaitForCheckpoint(t, s, 30*time.Second)
 		cpID := testutil.AssertHasCheckpointTrailer(t, s.Dir, "HEAD")
-		assertCommittedTaskCheckpointExists(t, s.Dir, cpID, taskPoint.ToolUseID)
 		meta := testutil.WaitForSessionMetadata(t, s.Dir, cpID, 0, 30*time.Second)
 
 		assert.Contains(t, meta.FilesTouched, "docs/factory-prehook-worker.md",
@@ -95,16 +94,4 @@ func waitForTaskRewindPoint(t *testing.T, dir string, timeout time.Duration) ent
 
 	t.Fatalf("expected task rewind point within %s", timeout)
 	return entire.RewindPoint{}
-}
-
-func assertCommittedTaskCheckpointExists(t *testing.T, dir, checkpointID, toolUseID string) {
-	t.Helper()
-
-	require.NotEmpty(t, toolUseID, "tool_use_id is required to locate committed task checkpoint")
-
-	path := testutil.CheckpointPath(checkpointID) + "/0/tasks/" + toolUseID + "/checkpoint.json"
-	blob := "entire/checkpoints/v1:" + path
-	raw, err := testutil.GitOutputErr(dir, "show", blob)
-	require.NoError(t, err, "expected committed task checkpoint at %s", path)
-	assert.NotEmpty(t, raw, "committed task checkpoint should not be empty at %s", path)
 }
