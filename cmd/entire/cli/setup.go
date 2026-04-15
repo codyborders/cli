@@ -12,6 +12,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/external"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
+	"github.com/entireio/cli/cmd/entire/cli/interactive"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
@@ -290,7 +291,7 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 	}
 
 	// Check if we can prompt interactively
-	if !canPromptInteractively() {
+	if !interactive.CanPromptInteractively() {
 		fmt.Fprintln(w, "Cannot show agent selection in non-interactive mode.")
 		fmt.Fprintln(w, "Use: entire configure --agent <name>")
 		return nil
@@ -1084,7 +1085,7 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 	}
 
 	// Check if we can prompt interactively
-	if !canPromptInteractively() {
+	if !interactive.CanPromptInteractively() {
 		if hasInstalledHooks {
 			// Re-run without TTY — keep currently installed agents
 			agents := make([]agent.Agent, 0, len(installedAgentNames))
@@ -1207,23 +1208,6 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 
 func isBuiltInAgent(ag agent.Agent) bool {
 	return !external.IsExternal(ag)
-}
-
-// canPromptInteractively checks if we can show interactive prompts.
-// Returns false when running in CI, tests, or other non-interactive environments.
-func canPromptInteractively() bool {
-	// Check for test environment
-	if os.Getenv("ENTIRE_TEST_TTY") != "" {
-		return os.Getenv("ENTIRE_TEST_TTY") == "1"
-	}
-
-	// Check if /dev/tty is available
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		return false
-	}
-	_ = tty.Close()
-	return true
 }
 
 // printAgentError writes an error message followed by available agents and usage.

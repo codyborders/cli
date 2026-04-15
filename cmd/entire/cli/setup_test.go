@@ -1102,35 +1102,6 @@ func TestEnableCmd_ForceAndStrategyFlagsOnConfiguredDisabledRepo_ReenablesAndUpd
 	}
 }
 
-// Tests for canPromptInteractively
-
-func TestCanPromptInteractively_EnvVar_True(t *testing.T) {
-	// Cannot use t.Parallel() because we use t.Setenv
-	t.Setenv("ENTIRE_TEST_TTY", "1")
-
-	if !canPromptInteractively() {
-		t.Error("canPromptInteractively() = false, want true when ENTIRE_TEST_TTY=1")
-	}
-}
-
-func TestCanPromptInteractively_EnvVar_False(t *testing.T) {
-	// Cannot use t.Parallel() because we use t.Setenv
-	t.Setenv("ENTIRE_TEST_TTY", "0")
-
-	if canPromptInteractively() {
-		t.Error("canPromptInteractively() = true, want false when ENTIRE_TEST_TTY=0")
-	}
-}
-
-func TestCanPromptInteractively_EnvVar_OtherValue(t *testing.T) {
-	// Cannot use t.Parallel() because we use t.Setenv
-	t.Setenv("ENTIRE_TEST_TTY", "yes") // Not "1", so should be false
-
-	if canPromptInteractively() {
-		t.Error("canPromptInteractively() = true, want false when ENTIRE_TEST_TTY is set but not '1'")
-	}
-}
-
 // Tests for detectOrSelectAgent
 
 func TestDetectOrSelectAgent_AgentDetected(t *testing.T) {

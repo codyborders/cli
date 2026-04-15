@@ -8,6 +8,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
+	"github.com/entireio/cli/cmd/entire/cli/interactive"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/settings"
@@ -61,7 +62,7 @@ func resolveCheckpointSummaryProvider(ctx context.Context, w io.Writer) (*checkp
 		}
 		return provider, nil
 	default:
-		if !canPromptInteractively() {
+		if !interactive.CanPromptInteractively() {
 			logging.Info(ctx, "non-interactive mode with multiple summary providers, falling back to Claude Code")
 			return buildCheckpointSummaryProvider(agent.AgentNameClaudeCode, "")
 		}
