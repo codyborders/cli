@@ -2,6 +2,7 @@ package summarize
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -38,6 +39,62 @@ func (m *mockTextGenerator) GenerateText(_ context.Context, prompt string, model
 	m.prompt = prompt
 	m.model = model
 	return m.result, nil
+}
+
+type errorTextGenerator struct {
+	mockTextGenerator
+
+	err error
+}
+
+func (e *errorTextGenerator) GenerateText(context.Context, string, string) (string, error) {
+	return "", e.err
+}
+
+func TestTextGeneratorAdapter_NilTextGenerator(t *testing.T) {
+	t.Parallel()
+
+	generator := &TextGeneratorAdapter{
+		TextGenerator: nil,
+		Model:         "test-model",
+	}
+
+	_, err := generator.Generate(context.Background(), Input{
+		Transcript: []Entry{{Type: EntryTypeUser, Content: "test"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for nil TextGenerator")
+	}
+	if !strings.Contains(err.Error(), "text generator not configured") {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), "text generator not configured")
+	}
+}
+
+func TestTextGeneratorAdapter_GenerateError(t *testing.T) {
+	t.Parallel()
+
+	mock := &mockTextGenerator{}
+	generator := &TextGeneratorAdapter{
+		TextGenerator: mock,
+		Model:         "test-model",
+	}
+
+	// Override GenerateText to return an error by using a different mock approach
+	errMock := &errorTextGenerator{err: errors.New("provider auth failed")}
+	generator.TextGenerator = errMock
+
+	_, err := generator.Generate(context.Background(), Input{
+		Transcript: []Entry{{Type: EntryTypeUser, Content: "test"}},
+	})
+	if err == nil {
+		t.Fatal("expected error from GenerateText")
+	}
+	if !strings.Contains(err.Error(), "provider text generation failed") {
+		t.Fatalf("error = %q, want it to contain wrapper message", err.Error())
+	}
+	if !errors.Is(err, errMock.err) {
+		t.Fatalf("error chain should include original error")
+	}
 }
 
 func TestTextGeneratorAdapter_Generate(t *testing.T) {

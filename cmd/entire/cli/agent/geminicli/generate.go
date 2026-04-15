@@ -12,12 +12,12 @@ var geminiCommandRunner = exec.CommandContext
 
 // GenerateText sends a prompt to the Gemini CLI and returns the raw text response.
 func (g *GeminiCLIAgent) GenerateText(ctx context.Context, prompt string, model string) (string, error) {
-	args := []string{"-p", ""}
+	args := []string{"-p", prompt}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
 
-	result, err := agent.RunIsolatedTextGeneratorCLI(ctx, geminiCommandRunner, "gemini", "gemini", args, prompt)
+	result, err := agent.RunIsolatedTextGeneratorCLI(ctx, geminiCommandRunner, "gemini", "gemini", args, "")
 	if err != nil {
 		return "", fmt.Errorf("gemini text generation failed: %w", err)
 	}

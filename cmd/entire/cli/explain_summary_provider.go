@@ -43,7 +43,7 @@ func resolveCheckpointSummaryProvider(ctx context.Context, w io.Writer) (*checkp
 		return buildCheckpointSummaryProvider(types.AgentName(s.SummaryGeneration.Provider), s.SummaryGeneration.Model)
 	}
 
-	candidates, err := listEnabledSummaryProviders()
+	candidates, err := listEnabledSummaryProviders(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +60,7 @@ func resolveCheckpointSummaryProvider(ctx context.Context, w io.Writer) (*checkp
 		if saveErr := persistSummaryProviderSelection(ctx, provider.Name, provider.Model); saveErr != nil {
 			logging.Warn(ctx, "failed to save summary provider selection, continuing without persistence",
 				"error", saveErr.Error())
+			fmt.Fprintf(w, "Warning: could not save provider selection: %v\nUse `entire configure --summarize-provider %s` to set it manually.\n", saveErr, provider.Name)
 		}
 		return provider, nil
 	default:
@@ -80,14 +81,15 @@ func resolveCheckpointSummaryProvider(ctx context.Context, w io.Writer) (*checkp
 		if saveErr := persistSummaryProviderSelection(ctx, provider.Name, provider.Model); saveErr != nil {
 			logging.Warn(ctx, "failed to save summary provider selection, continuing without persistence",
 				"error", saveErr.Error())
+			fmt.Fprintf(w, "Warning: could not save provider selection: %v\nUse `entire configure --summarize-provider %s` to set it manually.\n", saveErr, provider.Name)
 		}
 		fmt.Fprintf(w, "Using %s for summary generation.\n", provider.DisplayName)
 		return provider, nil
 	}
 }
 
-func listEnabledSummaryProviders() ([]checkpointSummaryProvider, error) {
-	installed := listInstalledAgents(context.Background())
+func listEnabledSummaryProviders(ctx context.Context) ([]checkpointSummaryProvider, error) {
+	installed := listInstalledAgents(ctx)
 	providers := make([]checkpointSummaryProvider, 0, len(installed))
 	for _, name := range installed {
 		ag, err := getSummaryAgent(name)

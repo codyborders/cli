@@ -2,6 +2,7 @@ package summarize
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
@@ -18,6 +19,9 @@ type TextGeneratorAdapter struct {
 // Generate creates a summary using the shared prompt, then delegates raw text
 // generation to the configured agent provider.
 func (g *TextGeneratorAdapter) Generate(ctx context.Context, input Input) (*checkpoint.Summary, error) {
+	if g.TextGenerator == nil {
+		return nil, errors.New("text generator not configured")
+	}
 	transcriptText := FormatCondensedTranscript(input)
 	prompt := buildSummarizationPrompt(transcriptText)
 

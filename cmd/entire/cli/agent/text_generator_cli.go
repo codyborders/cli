@@ -39,16 +39,23 @@ func RunIsolatedTextGeneratorCLI(ctx context.Context, runner TextCommandRunner, 
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			detail := stderr.String()
+			detail := strings.TrimSpace(stderr.String())
 			if detail == "" {
-				detail = stdout.String()
+				detail = strings.TrimSpace(stdout.String())
 			}
-			return "", fmt.Errorf("%s CLI failed (exit %d): %s", displayName, exitErr.ExitCode(), detail)
+			if detail == "" {
+				detail = err.Error()
+			}
+			return "", fmt.Errorf("%s CLI failed (exit %d): %s: %w", displayName, exitErr.ExitCode(), detail, err)
 		}
 		return "", fmt.Errorf("failed to run %s CLI: %w", displayName, err)
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	result := strings.TrimSpace(stdout.String())
+	if result == "" {
+		return "", fmt.Errorf("%s CLI returned empty output", displayName)
+	}
+	return result, nil
 }
 
 func StripGitEnv(env []string) []string {
