@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const windowsOS = "windows"
+
 func TestRunIsolatedTextGeneratorCLI_Success(t *testing.T) {
 	t.Parallel()
 
@@ -47,7 +49,7 @@ func TestRunIsolatedTextGeneratorCLI_EmptyOutput(t *testing.T) {
 		return exec.CommandContext(ctx, "echo", "-n", "")
 	}
 	// On some systems echo -n "" still prints a newline; use printf for reliable empty output
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != windowsOS {
 		runner = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "printf", "")
 		}
@@ -138,7 +140,7 @@ func TestRunIsolatedTextGeneratorCLI_StdinPassedToCommand(t *testing.T) {
 func TestRunIsolatedTextGeneratorCLI_CanceledContextPreservesSentinel(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("uses POSIX shell command")
 	}
 
@@ -164,7 +166,7 @@ func TestRunIsolatedTextGeneratorCLI_CanceledContextPreservesSentinel(t *testing
 func TestRunIsolatedTextGeneratorCLI_DeadlineExceededPreservesSentinel(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("uses POSIX shell command")
 	}
 
