@@ -392,14 +392,28 @@ func FetchAndCheckoutRemoteBranch(ctx context.Context, branchName string) error 
 
 // FetchMetadataBranch fetches the entire/checkpoints/v1 branch from origin and creates/updates the local branch.
 // This is used when the metadata branch exists on remote but not locally.
-// The fetch is treeless (--filter=blob:none) because checkpoint metadata reads
-// support on-demand blob retrieval.
 // Uses git CLI instead of go-git for fetch because go-git doesn't use credential helpers,
 // which breaks HTTPS URLs that require authentication.
 func FetchMetadataBranch(ctx context.Context) error {
+	return fetchMetadataFromOrigin(ctx, false /* treeless */)
+}
+
+// FetchMetadataTreeOnly fetches the tip of the entire/checkpoints/v1 branch
+// from origin with --depth=1 --filter=blob:none, downloading only the latest
+// commit and its tree objects (no blobs, no history).
+// After this call, tree navigation via go-git works but blob reads will fail
+// for objects that weren't previously fetched.
+func FetchMetadataTreeOnly(ctx context.Context) error {
+	return fetchMetadataFromOrigin(ctx, true /* treeless */)
+}
+
+// fetchMetadataFromOrigin fetches the v1 metadata branch from origin into the
+// remote-tracking ref refs/remotes/origin/<branch>, then safely advances the
+// local branch to match. When treeless is true, --depth=1 is added so only
+// the tip is downloaded.
+func fetchMetadataFromOrigin(ctx context.Context, treeless bool) error {
 	branchName := paths.MetadataBranchName
 
-	// Use git CLI for fetch (go-git's fetch can be tricky with auth)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
@@ -409,8 +423,13 @@ func FetchMetadataBranch(ctx context.Context) error {
 	}
 
 	refSpec := fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branchName, branchName)
+	args := []string{"fetch", "--no-tags"}
+	if treeless {
+		args = append(args, "--depth=1")
+	}
+	args = append(args, fetchTarget, refSpec)
 
-	fetchArgs := strategy.AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, refSpec})
+	fetchArgs := strategy.AppendFetchFilterArgs(ctx, args)
 	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -424,99 +443,22 @@ func FetchMetadataBranch(ctx context.Context) error {
 		return fmt.Errorf("failed to open repository: %w", err)
 	}
 
-	// Get the remote branch reference
 	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
 	if err != nil {
 		return fmt.Errorf("branch '%s' not found on origin: %w", branchName, err)
 	}
-
-	// Advance the local branch only when doing so cannot rewind locally-ahead
-	// commits. The ancestry-safe helper is critical: there is a short window
-	// between condensation writing a commit to the local metadata branch and
-	// pre-push publishing it, during which naive "local := remote.tip" would
-	// orphan the unpushed checkpoint commit.
 	if err := strategy.SafelyAdvanceLocalRef(ctx, repo, plumbing.NewBranchReferenceName(branchName), remoteRef.Hash()); err != nil {
 		return fmt.Errorf("failed to advance local %s branch: %w", branchName, err)
 	}
 	return nil
 }
-
-// FetchMetadataTreeOnly fetches the tip of the entire/checkpoints/v1 branch
-// from origin with --depth=1 --filter=blob:none, downloading only the latest
-// commit and its tree objects (no blobs, no history).
-// After this call, tree navigation via go-git works but blob reads will fail
-// for objects that weren't previously fetched.
-// Uses git CLI for credential helper support.
-func FetchMetadataTreeOnly(ctx context.Context) error {
-	branchName := paths.MetadataBranchName
-
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
-	fetchTarget, err := strategy.ResolveFetchTarget(ctx, "origin")
-	if err != nil {
-		return fmt.Errorf("failed to resolve fetch target: %w", err)
-	}
-
-	refSpec := fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branchName, branchName)
-
-	fetchArgs := strategy.AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", "--depth=1", fetchTarget, refSpec})
-	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
-	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return errors.New("treeless fetch timed out after 2 minutes")
-		}
-		return formatFilteredFetchError("failed to treeless-fetch "+branchName, fetchTarget, output, fetchErr)
-	}
-
-	repo, err := openRepository(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	// Get the remote branch reference
-	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
-	if err != nil {
-		return fmt.Errorf("branch '%s' not found on origin: %w", branchName, err)
-	}
-
-	if err := strategy.SafelyAdvanceLocalRef(ctx, repo, plumbing.NewBranchReferenceName(branchName), remoteRef.Hash()); err != nil {
-		return fmt.Errorf("failed to advance local %s branch: %w", branchName, err)
-	}
-	return nil
-}
-
-// v2MainFetchTmpRef is the temporary ref that FetchV2Main* functions use to
-// land fetched hashes before safely updating the local ref. Writing directly
-// to refs/entire/checkpoints/v2/main via `+refspec` would force-overwrite
-// locally-ahead commits.
-const v2MainFetchTmpRef = "refs/entire-fetch-tmp/v2-main"
 
 // FetchV2MainTreeOnly fetches the tip of the v2 /main ref from origin with
 // --depth=1 --filter=blob:none, downloading only the latest commit and its
 // tree objects (no blobs, no history).
 // Uses explicit refspec since v2 refs are under refs/entire/, not refs/heads/.
 func FetchV2MainTreeOnly(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
-	fetchTarget, err := strategy.ResolveFetchTarget(ctx, "origin")
-	if err != nil {
-		return fmt.Errorf("failed to resolve fetch target: %w", err)
-	}
-
-	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, v2MainFetchTmpRef)
-
-	fetchArgs := strategy.AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", "--depth=1", fetchTarget, refSpec})
-	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
-	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return errors.New("v2 treeless fetch timed out after 2 minutes")
-		}
-		return formatFilteredFetchError("failed to treeless-fetch v2 /main", fetchTarget, output, fetchErr)
-	}
-
-	return applyV2MainFromTmpRef(ctx)
+	return fetchV2MainFromOrigin(ctx, true /* treeless */)
 }
 
 // FetchV2MainRef fetches the v2 /main ref from origin.
@@ -524,6 +466,13 @@ func FetchV2MainTreeOnly(ctx context.Context) error {
 // v2 checkpoint reads handle transcript retrieval separately.
 // Uses explicit refspec since v2 refs are under refs/entire/, not refs/heads/.
 func FetchV2MainRef(ctx context.Context) error {
+	return fetchV2MainFromOrigin(ctx, false /* treeless */)
+}
+
+// fetchV2MainFromOrigin fetches the v2 /main ref from origin into the shared
+// staging ref, then promotes it via strategy.PromoteTmpRefSafely. When
+// treeless is true, --depth=1 is added so only the tip is downloaded.
+func fetchV2MainFromOrigin(ctx context.Context, treeless bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
@@ -532,9 +481,14 @@ func FetchV2MainRef(ctx context.Context) error {
 		return fmt.Errorf("failed to resolve fetch target: %w", err)
 	}
 
-	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, v2MainFetchTmpRef)
+	refSpec := fmt.Sprintf("+%s:%s", paths.V2MainRefName, strategy.V2MainFetchTmpRef)
+	args := []string{"fetch", "--no-tags"}
+	if treeless {
+		args = append(args, "--depth=1")
+	}
+	args = append(args, fetchTarget, refSpec)
 
-	fetchArgs := strategy.AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, refSpec})
+	fetchArgs := strategy.AppendFetchFilterArgs(ctx, args)
 	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -543,29 +497,9 @@ func FetchV2MainRef(ctx context.Context) error {
 		return formatFilteredFetchError("failed to fetch v2 /main", fetchTarget, output, fetchErr)
 	}
 
-	return applyV2MainFromTmpRef(ctx)
-}
-
-// applyV2MainFromTmpRef promotes v2MainFetchTmpRef to the real V2MainRefName
-// (with safe ancestry check), then removes the tmp ref.
-func applyV2MainFromTmpRef(ctx context.Context) error {
-	repo, err := openRepository(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
+	if err := strategy.PromoteTmpRefSafely(ctx, strategy.V2MainFetchTmpRef, paths.V2MainRefName, "v2 /main"); err != nil {
+		return fmt.Errorf("origin v2 /main fetch: %w", err)
 	}
-
-	tmpRefName := plumbing.ReferenceName(v2MainFetchTmpRef)
-	tmpRef, err := repo.Reference(tmpRefName, true)
-	if err != nil {
-		return fmt.Errorf("v2 /main not found after fetch (tmp ref %s missing): %w", v2MainFetchTmpRef, err)
-	}
-	fetchedHash := tmpRef.Hash()
-
-	if err := strategy.SafelyAdvanceLocalRef(ctx, repo, plumbing.ReferenceName(paths.V2MainRefName), fetchedHash); err != nil {
-		return fmt.Errorf("failed to advance local v2 /main: %w", err)
-	}
-
-	_ = repo.Storer.RemoveReference(tmpRefName) //nolint:errcheck // cleanup is best-effort
 	return nil
 }
 
