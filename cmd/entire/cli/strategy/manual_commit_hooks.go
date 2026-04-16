@@ -2242,14 +2242,26 @@ func (s *ManualCommitStrategy) InitializeSession(ctx context.Context, sessionID 
 			state.TranscriptPath = transcriptPath
 		}
 
-		// ORDERING: migrateShadowBranchIfNeeded MUST run before clearing
-		// LastCheckpointID and before calculatePromptAttributionAtStart.
+		// ORDERING: attribution runs BEFORE migrate to use the pre-migration
+		// BaseCommit as the base tree (preserving correct agent-line counts when
+		// HEAD moved between turns via pull/rebase). Migrate runs BEFORE the
+		// LastCheckpointID clear so the reconcile guard can read the checkpoint ID.
 		//
-		// 1. Reconcile reads state.LastCheckpointID — clearing it first would
-		//    prevent the reconcile path from ever firing at turn start.
-		// 2. Attribution reads state.BaseCommit to locate the shadow branch —
-		//    running it before migrate would diff against the stale base in
-		//    the reset-to-checkpoint case.
+		// Sequence: attribution → migrate → clear
+		//
+		// 1. Attribution uses state.BaseCommit to locate the shadow branch and
+		//    base tree. Running it before migrate ensures it diffs against the
+		//    original base, not the post-migration HEAD.
+		// 2. Migrate/reconcile reads state.LastCheckpointID — clearing it first
+		//    would prevent the reconcile path from ever firing at turn start.
+
+		// Calculate attribution at prompt start (BEFORE agent makes any changes)
+		// This captures user edits since the last checkpoint (or base commit for first prompt).
+		// IMPORTANT: Always calculate attribution, even for the first checkpoint, to capture
+		// user edits made before the first prompt. The inner CalculatePromptAttribution handles
+		// nil lastCheckpointTree by falling back to baseTree.
+		promptAttr := s.calculatePromptAttributionAtStart(ctx, repo, state)
+		state.PendingPromptAttribution = &promptAttr
 
 		// Check if HEAD has moved (user pulled/rebased or committed)
 		// migrateShadowBranchIfNeeded handles renaming the shadow branch and updating state.BaseCommit
@@ -2262,14 +2274,6 @@ func (s *ManualCommitStrategy) InitializeSession(ctx context.Context, sessionID 
 		// TurnCheckpointIDs tracks mid-turn checkpoints for stop-time finalization.
 		state.LastCheckpointID = ""
 		state.TurnCheckpointIDs = nil
-
-		// Calculate attribution at prompt start (BEFORE agent makes any changes)
-		// This captures user edits since the last checkpoint (or base commit for first prompt).
-		// IMPORTANT: Always calculate attribution, even for the first checkpoint, to capture
-		// user edits made before the first prompt. The inner CalculatePromptAttribution handles
-		// nil lastCheckpointTree by falling back to baseTree.
-		promptAttr := s.calculatePromptAttributionAtStart(ctx, repo, state)
-		state.PendingPromptAttribution = &promptAttr
 
 		if err := s.saveSessionState(ctx, state); err != nil {
 			return fmt.Errorf("failed to update session state: %w", err)
