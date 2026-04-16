@@ -13,6 +13,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
@@ -32,6 +33,7 @@ const (
 	CleanupTypeShadowBranch CleanupType = "shadow-branch"
 	CleanupTypeSessionState CleanupType = "session-state"
 	CleanupTypeCheckpoint   CleanupType = "checkpoint"
+	CleanupTypeV2Generation CleanupType = "v2-generation"
 )
 
 // CleanupItem represents an item that can be cleaned up.
@@ -46,9 +48,11 @@ type CleanupResult struct {
 	ShadowBranches    []string // Deleted shadow branches
 	SessionStates     []string // Deleted session state files
 	Checkpoints       []string // Deleted checkpoint metadata
+	V2Generations     []string // Deleted archived v2 generation refs
 	FailedBranches    []string // Shadow branches that failed to delete
 	FailedStates      []string // Session states that failed to delete
 	FailedCheckpoints []string // Checkpoints that failed to delete
+	FailedV2Refs      []string // Archived v2 generation refs that failed to delete
 }
 
 // shadowBranchPattern matches shadow branch names in both old and new formats:
@@ -335,11 +339,87 @@ func DeleteOrphanedCheckpoints(ctx context.Context, checkpointIDs []string) (del
 	return checkpointIDs, []string{}, nil
 }
 
+// ListEligibleV2Generations returns archived checkpoints v2 /full/* generations
+// eligible for deletion based on the configured retention window.
+func ListEligibleV2Generations(ctx context.Context) ([]CleanupItem, error) {
+	s, err := settings.Load(ctx)
+	if err != nil {
+		return []CleanupItem{}, nil
+	}
+
+	repo, err := OpenRepository(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open git repository: %w", err)
+	}
+
+	store := checkpoint.NewV2GitStore(repo, "origin")
+	archived, err := store.ListArchivedGenerations()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list archived generations: %w", err)
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -s.GetFullTranscriptGenerationRetentionDays())
+	cleanupItems := make([]CleanupItem, 0, len(archived))
+
+	for _, name := range archived {
+		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + name)
+		_, treeHash, refErr := store.GetRefState(refName)
+		if refErr != nil {
+			continue
+		}
+
+		gen, genErr := store.ReadGeneration(treeHash)
+		if genErr != nil {
+			continue
+		}
+		if gen.OldestCheckpointAt.IsZero() || gen.NewestCheckpointAt.IsZero() {
+			continue
+		}
+		if gen.OldestCheckpointAt.After(gen.NewestCheckpointAt) {
+			continue
+		}
+		if !gen.NewestCheckpointAt.Before(cutoff) {
+			continue
+		}
+
+		cleanupItems = append(cleanupItems, CleanupItem{
+			Type:   CleanupTypeV2Generation,
+			ID:     name,
+			Reason: "expired archived full transcript generation",
+		})
+	}
+
+	return cleanupItems, nil
+}
+
+// DeleteV2Generations deletes archived checkpoints v2 /full/* generation refs.
+func DeleteV2Generations(ctx context.Context, generationNames []string) (deleted []string, failed []string, err error) {
+	if len(generationNames) == 0 {
+		return []string{}, []string{}, nil
+	}
+
+	repo, err := OpenRepository(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open git repository: %w", err)
+	}
+
+	for _, name := range generationNames {
+		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + name)
+		if err := repo.Storer.RemoveReference(refName); err != nil {
+			failed = append(failed, name)
+			continue
+		}
+		deleted = append(deleted, name)
+	}
+
+	return deleted, failed, nil
+}
+
 // ListAllItems returns all Entire items for full cleanup.
 // This includes all shadow branches and all session states regardless of
 // whether they have checkpoints or active shadow branches.
 func ListAllItems(ctx context.Context) ([]CleanupItem, error) {
-	var items []CleanupItem
+	var cleanupItems []CleanupItem
 
 	// All shadow branches (using ListShadowBranches directly, not
 	// ListOrphanedItems, so this won't break if orphan filtering is added)
@@ -348,7 +428,7 @@ func ListAllItems(ctx context.Context) ([]CleanupItem, error) {
 		return nil, fmt.Errorf("listing shadow branches: %w", err)
 	}
 	for _, branch := range branches {
-		items = append(items, CleanupItem{
+		cleanupItems = append(cleanupItems, CleanupItem{
 			Type:   CleanupTypeShadowBranch,
 			ID:     branch,
 			Reason: "clean all",
@@ -367,14 +447,14 @@ func ListAllItems(ctx context.Context) ([]CleanupItem, error) {
 	}
 
 	for _, state := range states {
-		items = append(items, CleanupItem{
+		cleanupItems = append(cleanupItems, CleanupItem{
 			Type:   CleanupTypeSessionState,
 			ID:     state.SessionID,
 			Reason: "clean all",
 		})
 	}
 
-	return items, nil
+	return cleanupItems, nil
 }
 
 // DeleteAllCleanupItems deletes all specified cleanup items.
@@ -390,7 +470,7 @@ func DeleteAllCleanupItems(ctx context.Context, items []CleanupItem) (*CleanupRe
 	}
 
 	// Group items by type
-	var branches, states, checkpoints []string
+	var branches, states, checkpoints, v2Generations []string
 	for _, item := range items {
 		switch item.Type {
 		case CleanupTypeShadowBranch:
@@ -399,6 +479,8 @@ func DeleteAllCleanupItems(ctx context.Context, items []CleanupItem) (*CleanupRe
 			states = append(states, item.ID)
 		case CleanupTypeCheckpoint:
 			checkpoints = append(checkpoints, item.ID)
+		case CleanupTypeV2Generation:
+			v2Generations = append(v2Generations, item.ID)
 		}
 	}
 
@@ -483,17 +565,43 @@ func DeleteAllCleanupItems(ctx context.Context, items []CleanupItem) (*CleanupRe
 		}
 	}
 
+	if len(v2Generations) > 0 {
+		deleted, failed, err := DeleteV2Generations(ctx, v2Generations)
+		if err != nil {
+			return result, err
+		}
+		result.V2Generations = deleted
+		result.FailedV2Refs = failed
+
+		for _, id := range deleted {
+			logging.Info(logCtx, "deleted v2 generation",
+				slog.String("type", string(CleanupTypeV2Generation)),
+				slog.String("id", id),
+				slog.String("reason", reasonMap[id]),
+			)
+		}
+		for _, id := range failed {
+			logging.Warn(logCtx, "failed to delete v2 generation",
+				slog.String("type", string(CleanupTypeV2Generation)),
+				slog.String("id", id),
+				slog.String("reason", reasonMap[id]),
+			)
+		}
+	}
+
 	// Log summary
-	totalDeleted := len(result.ShadowBranches) + len(result.SessionStates) + len(result.Checkpoints)
-	totalFailed := len(result.FailedBranches) + len(result.FailedStates) + len(result.FailedCheckpoints)
+	totalDeleted := len(result.ShadowBranches) + len(result.SessionStates) + len(result.Checkpoints) + len(result.V2Generations)
+	totalFailed := len(result.FailedBranches) + len(result.FailedStates) + len(result.FailedCheckpoints) + len(result.FailedV2Refs)
 	if totalDeleted > 0 || totalFailed > 0 {
 		logging.Info(logCtx, "cleanup completed",
 			slog.Int("deleted_branches", len(result.ShadowBranches)),
 			slog.Int("deleted_session_states", len(result.SessionStates)),
 			slog.Int("deleted_checkpoints", len(result.Checkpoints)),
+			slog.Int("deleted_v2_generations", len(result.V2Generations)),
 			slog.Int("failed_branches", len(result.FailedBranches)),
 			slog.Int("failed_session_states", len(result.FailedStates)),
 			slog.Int("failed_checkpoints", len(result.FailedCheckpoints)),
+			slog.Int("failed_v2_generations", len(result.FailedV2Refs)),
 		)
 	}
 
