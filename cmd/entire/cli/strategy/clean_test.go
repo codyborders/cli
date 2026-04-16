@@ -135,6 +135,51 @@ func TestListShadowBranches(t *testing.T) {
 	}
 }
 
+func TestDeleteRefCLI_DeletesPackedCustomRef(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	t.Chdir(dir)
+
+	emptyTreeHash := plumbing.NewHash("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+	commitHash, err := createCommit(repo, emptyTreeHash, plumbing.ZeroHash, "initial commit", "test", "test@test.com")
+	if err != nil {
+		t.Fatalf("failed to create initial commit: %v", err)
+	}
+
+	headRef := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName("master"))
+	if err := repo.Storer.SetReference(headRef); err != nil {
+		t.Fatalf("failed to set HEAD: %v", err)
+	}
+	masterRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("master"), commitHash)
+	if err := repo.Storer.SetReference(masterRef); err != nil {
+		t.Fatalf("failed to set master: %v", err)
+	}
+
+	refName := paths.V2FullRefPrefix + "0000000000001"
+	ref := plumbing.NewHashReference(plumbing.ReferenceName(refName), commitHash)
+	if err := repo.Storer.SetReference(ref); err != nil {
+		t.Fatalf("failed to create custom ref: %v", err)
+	}
+
+	packRefsCmd := exec.CommandContext(context.Background(), "git", "pack-refs", "--all")
+	if output, err := packRefsCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to pack refs: %s: %v", strings.TrimSpace(string(output)), err)
+	}
+
+	if err := DeleteRefCLI(context.Background(), refName); err != nil {
+		t.Fatalf("DeleteRefCLI() error = %v", err)
+	}
+
+	showRefCmd := exec.CommandContext(context.Background(), "git", "show-ref", "--verify", "--quiet", refName)
+	if err := showRefCmd.Run(); err == nil {
+		t.Fatalf("ref %s should be deleted", refName)
+	}
+}
+
 func TestListShadowBranches_Empty(t *testing.T) {
 	// Setup: create a temp git repo with no shadow branches
 	dir := t.TempDir()

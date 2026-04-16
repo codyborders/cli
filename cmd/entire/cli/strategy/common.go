@@ -1315,6 +1315,9 @@ func getTaskTranscriptFromTree(ctx context.Context, point RewindPoint) ([]byte, 
 // ErrBranchNotFound is returned by DeleteBranchCLI when the branch does not exist.
 var ErrBranchNotFound = errors.New("branch not found")
 
+// ErrRefNotFound is returned by DeleteRefCLI when the ref does not exist.
+var ErrRefNotFound = errors.New("ref not found")
+
 // DeleteBranchCLI deletes a git branch using the git CLI.
 // Uses `git branch -D` instead of go-git's RemoveReference because go-git v5
 // doesn't properly persist deletions when refs are packed (.git/packed-refs)
@@ -1341,6 +1344,29 @@ func DeleteBranchCLI(ctx context.Context, branchName string) error {
 	cmd := exec.CommandContext(ctx, "git", "branch", "-D", "--", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to delete branch %s: %s: %w", branchName, strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
+// DeleteRefCLI deletes an arbitrary ref using the git CLI.
+// Uses `git update-ref -d` instead of go-git's RemoveReference because go-git
+// ref deletion is unreliable with packed refs and worktrees.
+//
+// Returns ErrRefNotFound if the ref does not exist, allowing callers to use
+// errors.Is for idempotent deletion patterns.
+func DeleteRefCLI(ctx context.Context, refName string) error {
+	check := exec.CommandContext(ctx, "git", "show-ref", "--verify", "--quiet", refName)
+	if err := check.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return fmt.Errorf("%w: %s", ErrRefNotFound, refName)
+		}
+		return fmt.Errorf("failed to check ref %s: %w", refName, err)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "update-ref", "-d", refName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete ref %s: %s: %w", refName, strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }

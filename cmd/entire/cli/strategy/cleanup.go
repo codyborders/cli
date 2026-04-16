@@ -410,14 +410,9 @@ func DeleteV2Generations(ctx context.Context, generationNames []string) (deleted
 		return []string{}, []string{}, nil
 	}
 
-	repo, err := OpenRepository(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open git repository: %w", err)
-	}
-
 	for _, name := range generationNames {
 		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + name)
-		if err := repo.Storer.RemoveReference(refName); err != nil {
+		if err := DeleteRefCLI(ctx, refName.String()); err != nil {
 			failed = append(failed, name)
 			continue
 		}
