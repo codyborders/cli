@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 )
 
 // TextCommandRunner matches exec.CommandContext and allows tests to inject a runner.
@@ -62,6 +64,32 @@ func RunIsolatedTextGeneratorCLI(ctx context.Context, runner TextCommandRunner, 
 		return "", fmt.Errorf("%s CLI returned empty output", displayName)
 	}
 	return result, nil
+}
+
+// summaryProviderBinaries maps agent names to the CLI binary that
+// RunIsolatedTextGeneratorCLI will exec. Used by IsSummaryCLIAvailable to
+// check PATH instead of repo-level DetectPresence, because a repo can use
+// one agent for development while a different agent generates summaries.
+var summaryProviderBinaries = map[types.AgentName]string{
+	AgentNameClaudeCode: "claude",
+	AgentNameCodex:      "codex",
+	AgentNameCopilotCLI: "copilot",
+	AgentNameCursor:     "agent",
+	AgentNameGemini:     "gemini",
+}
+
+// IsSummaryCLIAvailable reports whether the CLI binary for a summary-capable
+// agent is on PATH. This is distinct from DetectPresence, which checks
+// repo-level agent configuration — a repo configured with Claude Code for
+// development can still use Codex or Gemini for summary generation as long
+// as the binary is installed.
+func IsSummaryCLIAvailable(name types.AgentName) bool {
+	binary, ok := summaryProviderBinaries[name]
+	if !ok {
+		return false
+	}
+	_, err := exec.LookPath(binary)
+	return err == nil
 }
 
 func StripGitEnv(env []string) []string {

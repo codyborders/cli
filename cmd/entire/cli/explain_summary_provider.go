@@ -25,6 +25,7 @@ var (
 	saveLocalSummarySettings    = SaveEntireSettingsLocal
 	getSummaryAgent             = agent.Get
 	listRegisteredAgents        = agent.List
+	isSummaryCLIAvailable       = agent.IsSummaryCLIAvailable
 )
 
 type checkpointSummaryProvider struct {
@@ -91,7 +92,7 @@ func autoSelectSummaryProvider(ctx context.Context, w io.Writer, name types.Agen
 	return provider, nil
 }
 
-func listEnabledSummaryProviders(ctx context.Context) []checkpointSummaryProvider {
+func listEnabledSummaryProviders(_ context.Context) []checkpointSummaryProvider {
 	registered := listRegisteredAgents()
 	providers := make([]checkpointSummaryProvider, 0, len(registered))
 	for _, name := range registered {
@@ -102,16 +103,9 @@ func listEnabledSummaryProviders(ctx context.Context) []checkpointSummaryProvide
 		if _, ok := agent.AsTextGenerator(ag); !ok {
 			continue
 		}
-		present, err := ag.DetectPresence(ctx)
-		if err != nil {
-			// Log at Debug so a broken install (e.g., permission error on the
-			// agent's config dir) doesn't silently masquerade as "not installed"
-			// without any trace.
-			logging.Debug(ctx, "summary provider presence detection failed, skipping",
-				"agent", string(name), "error", err.Error())
-			continue
-		}
-		if !present {
+		// Check CLI binary on PATH, not DetectPresence — a repo can use
+		// Claude Code for development while Codex is the summary provider.
+		if !isSummaryCLIAvailable(name) {
 			continue
 		}
 		providers = append(providers, checkpointSummaryProvider{
@@ -169,32 +163,32 @@ func buildCheckpointSummaryProvider(name types.AgentName, model string) (*checkp
 	}, nil
 }
 
-// ensureSummaryProviderPresent returns an error if the named summary provider
-// is registered but its CLI binary is not installed on this machine. Used to
-// reject configured providers early (at resolve time) rather than deferring
-// the failure to an opaque shell-out error during generation.
-func ensureSummaryProviderPresent(ctx context.Context, name types.AgentName) error {
-	ag, err := getSummaryAgent(name)
-	if err != nil {
-		return fmt.Errorf("loading summary provider %s: %w", name, err)
+// ensureSummaryProviderPresent returns an error if the named summary provider's
+// CLI binary is not on PATH. Checks the binary directly (via exec.LookPath)
+// rather than DetectPresence, because DetectPresence checks repo-level agent
+// configuration — a repo using Claude Code for development can still use Codex
+// or Gemini for summary generation as long as the binary is installed.
+func ensureSummaryProviderPresent(_ context.Context, name types.AgentName) error {
+	if _, err := getSummaryAgent(name); err != nil {
+		return fmt.Errorf("unknown summary provider %s: %w", name, err)
 	}
-	present, err := ag.DetectPresence(ctx)
-	if err != nil {
-		return fmt.Errorf("checking availability of summary provider %s: %w", name, err)
-	}
-	if !present {
-		return fmt.Errorf("summary provider %q is configured but its CLI is not installed on this machine; install it or update summary_generation.provider in settings", name)
+	if !isSummaryCLIAvailable(name) {
+		return fmt.Errorf("summary provider %q is configured but its CLI binary is not on PATH; install it or update summary_generation.provider in settings", name)
 	}
 	return nil
 }
 
 func validateSummaryProvider(provider string) error {
-	ag, err := getSummaryAgent(types.AgentName(provider))
+	name := types.AgentName(provider)
+	ag, err := getSummaryAgent(name)
 	if err != nil {
 		return fmt.Errorf("unknown summary provider %q: %w", provider, err)
 	}
 	if _, ok := agent.AsTextGenerator(ag); !ok {
 		return fmt.Errorf("agent %q does not support summary generation", provider)
+	}
+	if !isSummaryCLIAvailable(name) {
+		return fmt.Errorf("agent %q supports summary generation but is not a recognized summary provider; supported providers: claude-code, codex, gemini, cursor, copilot-cli", provider)
 	}
 	return nil
 }

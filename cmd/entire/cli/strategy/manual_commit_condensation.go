@@ -426,7 +426,7 @@ func generateSummary(ctx context.Context, redactedTranscript redact.RedactedByte
 // The return type is the summarize.Generator interface rather than the concrete
 // adapter pointer so callers can't accidentally hold a non-nil interface that
 // wraps a nil pointer (the classic Go nil-interface footgun).
-func buildSummaryGenerator(ctx context.Context) summarize.Generator { //nolint:ireturn // intentional: return nil interface directly to avoid nil-pointer-wrapped-in-interface bug
+func buildSummaryGenerator(ctx context.Context) summarize.Generator {
 	s, err := settings.Load(ctx)
 	if err != nil {
 		// Warn (not Debug): this is the auto-summarize hot path on every commit.
@@ -448,18 +448,12 @@ func buildSummaryGenerator(ctx context.Context) summarize.Generator { //nolint:i
 		return nil
 	}
 
-	// Fall back silently (with a Warn log) when the configured CLI isn't
-	// installed: auto-summarize runs in the post-commit hook, so a hard
-	// error would block the commit. The on-demand explain --generate path
-	// surfaces the same situation as an explicit error instead.
-	present, err := ag.DetectPresence(ctx)
-	if err != nil {
-		logging.Warn(ctx, "detecting presence of configured summary provider failed, using default",
-			"provider", s.SummaryGeneration.Provider, "error", err.Error())
-		return nil
-	}
-	if !present {
-		logging.Warn(ctx, "configured summary provider CLI is not installed, using default",
+	// Check binary on PATH, not DetectPresence — a repo can use one agent
+	// for development while a different agent generates summaries. Fall back
+	// silently (Warn log) because this runs in the post-commit hook and a
+	// hard error would block the commit.
+	if !agent.IsSummaryCLIAvailable(providerName) {
+		logging.Warn(ctx, "configured summary provider CLI binary not on PATH, using default",
 			"provider", s.SummaryGeneration.Provider)
 		return nil
 	}

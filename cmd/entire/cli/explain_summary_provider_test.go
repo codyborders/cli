@@ -14,20 +14,17 @@ import (
 )
 
 type stubTextAgent struct {
-	name   types.AgentName
-	kind   types.AgentType
-	absent bool
+	name types.AgentName
+	kind types.AgentType
 }
 
-func (s *stubTextAgent) Name() types.AgentName { return s.name }
-func (s *stubTextAgent) Type() types.AgentType { return s.kind }
-func (s *stubTextAgent) Description() string   { return "stub" }
-func (s *stubTextAgent) IsPreview() bool       { return false }
-func (s *stubTextAgent) DetectPresence(context.Context) (bool, error) {
-	return !s.absent, nil
-}
-func (s *stubTextAgent) ProtectedDirs() []string               { return nil }
-func (s *stubTextAgent) ReadTranscript(string) ([]byte, error) { return nil, nil }
+func (s *stubTextAgent) Name() types.AgentName                        { return s.name }
+func (s *stubTextAgent) Type() types.AgentType                        { return s.kind }
+func (s *stubTextAgent) Description() string                          { return "stub" }
+func (s *stubTextAgent) IsPreview() bool                              { return false }
+func (s *stubTextAgent) DetectPresence(context.Context) (bool, error) { return true, nil }
+func (s *stubTextAgent) ProtectedDirs() []string                      { return nil }
+func (s *stubTextAgent) ReadTranscript(string) ([]byte, error)        { return nil, nil }
 func (s *stubTextAgent) ChunkTranscript(context.Context, []byte, int) ([][]byte, error) {
 	return nil, nil
 }
@@ -53,9 +50,11 @@ func TestResolveCheckpointSummaryProvider_UsesConfiguredProvider(t *testing.T) {
 
 	originalLoad := loadSummarySettings
 	originalGet := getSummaryAgent
+	originalCLI := isSummaryCLIAvailable
 	t.Cleanup(func() {
 		loadSummarySettings = originalLoad
 		getSummaryAgent = originalGet
+		isSummaryCLIAvailable = originalCLI
 	})
 
 	loadSummarySettings = func(context.Context) (*settings.EntireSettings, error) {
@@ -73,6 +72,7 @@ func TestResolveCheckpointSummaryProvider_UsesConfiguredProvider(t *testing.T) {
 			kind: agent.AgentTypeClaudeCode,
 		}, nil
 	}
+	isSummaryCLIAvailable = func(types.AgentName) bool { return true }
 
 	provider, err := resolveCheckpointSummaryProvider(ctx, &bytes.Buffer{})
 	if err != nil {
@@ -97,10 +97,12 @@ func TestResolveCheckpointSummaryProvider_SavesSingleInstalledProvider(t *testin
 	originalLoad := loadSummarySettings
 	originalGet := getSummaryAgent
 	originalList := listRegisteredAgents
+	originalCLI := isSummaryCLIAvailable
 	t.Cleanup(func() {
 		loadSummarySettings = originalLoad
 		getSummaryAgent = originalGet
 		listRegisteredAgents = originalList
+		isSummaryCLIAvailable = originalCLI
 	})
 
 	loadSummarySettings = func(context.Context) (*settings.EntireSettings, error) {
@@ -110,11 +112,9 @@ func TestResolveCheckpointSummaryProvider_SavesSingleInstalledProvider(t *testin
 		return []types.AgentName{agent.AgentNameCodex}
 	}
 	getSummaryAgent = func(name types.AgentName) (agent.Agent, error) {
-		return &stubTextAgent{
-			name: name,
-			kind: agent.AgentTypeCodex,
-		}, nil
+		return &stubTextAgent{name: name, kind: agent.AgentTypeCodex}, nil
 	}
+	isSummaryCLIAvailable = func(types.AgentName) bool { return true }
 
 	provider, err := resolveCheckpointSummaryProvider(ctx, &bytes.Buffer{})
 	if err != nil {
@@ -183,24 +183,24 @@ func TestResolveCheckpointSummaryProvider_NonInteractiveMultiCandidatePicksFirst
 	originalLoad := loadSummarySettings
 	originalGet := getSummaryAgent
 	originalList := listRegisteredAgents
+	originalCLI := isSummaryCLIAvailable
 	t.Cleanup(func() {
 		loadSummarySettings = originalLoad
 		getSummaryAgent = originalGet
 		listRegisteredAgents = originalList
+		isSummaryCLIAvailable = originalCLI
 	})
 
 	loadSummarySettings = func(context.Context) (*settings.EntireSettings, error) {
 		return &settings.EntireSettings{Enabled: true}, nil
 	}
 	listRegisteredAgents = func() []types.AgentName {
-		// Deliberately omit Claude Code: the old behavior forced Claude
-		// here even when not installed, which is the bug we're guarding
-		// against.
 		return []types.AgentName{agent.AgentNameCodex, agent.AgentNameGemini}
 	}
 	getSummaryAgent = func(name types.AgentName) (agent.Agent, error) {
 		return &stubTextAgent{name: name, kind: agent.AgentTypeCodex}, nil
 	}
+	isSummaryCLIAvailable = func(types.AgentName) bool { return true }
 
 	provider, err := resolveCheckpointSummaryProvider(ctx, &bytes.Buffer{})
 	if err != nil {
@@ -220,9 +220,11 @@ func TestResolveCheckpointSummaryProvider_ConfiguredProviderNotInstalledReturnsE
 
 	originalLoad := loadSummarySettings
 	originalGet := getSummaryAgent
+	originalCLI := isSummaryCLIAvailable
 	t.Cleanup(func() {
 		loadSummarySettings = originalLoad
 		getSummaryAgent = originalGet
+		isSummaryCLIAvailable = originalCLI
 	})
 
 	loadSummarySettings = func(context.Context) (*settings.EntireSettings, error) {
@@ -234,18 +236,15 @@ func TestResolveCheckpointSummaryProvider_ConfiguredProviderNotInstalledReturnsE
 		}, nil
 	}
 	getSummaryAgent = func(name types.AgentName) (agent.Agent, error) {
-		return &stubTextAgent{
-			name:   name,
-			kind:   agent.AgentTypeCodex,
-			absent: true,
-		}, nil
+		return &stubTextAgent{name: name, kind: agent.AgentTypeCodex}, nil
 	}
+	isSummaryCLIAvailable = func(types.AgentName) bool { return false }
 
 	_, err := resolveCheckpointSummaryProvider(ctx, &bytes.Buffer{})
 	if err == nil {
-		t.Fatal("expected error when configured provider's CLI is not installed")
+		t.Fatal("expected error when configured provider's CLI is not on PATH")
 	}
-	if !strings.Contains(err.Error(), "not installed on this machine") {
+	if !strings.Contains(err.Error(), "not on PATH") {
 		t.Fatalf("unexpected error text: %v", err)
 	}
 }

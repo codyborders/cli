@@ -2096,9 +2096,17 @@ func TestConfigureCmd_CheckpointRemote_DoesNotLeakMergedSettings(t *testing.T) {
 	}
 }
 
+func stubCLIAvailable(t *testing.T) {
+	t.Helper()
+	orig := isSummaryCLIAvailable
+	isSummaryCLIAvailable = func(types.AgentName) bool { return true }
+	t.Cleanup(func() { isSummaryCLIAvailable = orig })
+}
+
 func TestConfigureCmd_SummarizeProvider_UpdatesProjectSettings(t *testing.T) {
 	setupTestRepo(t)
 	writeSettings(t, testSettingsEnabled)
+	stubCLIAvailable(t)
 
 	cmd := newSetupCmd()
 	var stdout bytes.Buffer
@@ -2132,6 +2140,7 @@ func TestConfigureCmd_SummarizeProvider_UpdatesProjectSettings(t *testing.T) {
 func TestConfigureCmd_SummarizeProvider_WritesToLocalFile(t *testing.T) {
 	setupTestRepo(t)
 	writeSettings(t, testSettingsEnabled)
+	stubCLIAvailable(t)
 
 	cmd := newSetupCmd()
 	var stdout bytes.Buffer
@@ -2183,6 +2192,7 @@ func TestConfigureCmd_SummarizeProvider_InvalidProvider(t *testing.T) {
 }
 
 func TestConfigureCmd_SummarizeProvider_SwitchClearsStaleModel(t *testing.T) {
+	stubCLIAvailable(t)
 	setupTestRepo(t)
 	writeSettings(t, `{"enabled": true, "summary_generation": {"provider": "claude-code", "model": "sonnet"}}`)
 
@@ -2227,6 +2237,7 @@ func TestConfigureCmd_SummarizeModel_RequiresProvider(t *testing.T) {
 
 func TestConfigureCmd_SummarizeModel_UsesExistingProvider(t *testing.T) {
 	setupTestRepo(t)
+	stubCLIAvailable(t)
 	writeSettings(t, `{"enabled": true, "summary_generation": {"provider": "claude-code"}}`)
 
 	cmd := newSetupCmd()
