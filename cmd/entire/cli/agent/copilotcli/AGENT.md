@@ -173,12 +173,12 @@ copilot --allow-all-tools --disable-builtin-mcps   # prompt piped to stdin
 ```
 
 This matches the pattern used by every other summary-capable agent in the
-repo (Claude, Codex, Gemini, Cursor), so all five converge on one transport
-and the shared `agent.RunIsolatedTextGeneratorCLI` helper. It also sidesteps
-the OS `ARG_MAX` limit on long transcripts — even though Copilot's `--help`
-does not explicitly document stdin input, the CLI accepts it in practice
-(verified against v1.0.27 on darwin/arm64 producing well-formed summary JSON
-end-to-end).
+repo (Claude, Codex, Gemini, Cursor), which all converge on one transport
+through the shared `agent.RunIsolatedTextGeneratorCLI` helper. It also
+sidesteps the OS `ARG_MAX` limit on long transcripts — and while Copilot's
+`--help` does not explicitly document stdin input, Copilot's own error
+output does (`"provide a prompt with -p or via standard in."`), and end-to-end
+summary generation has been verified against the installed CLI.
 
 If a future Copilot release changes this, the error surface is clear — the
 generator helper returns either "CLI returned empty output" or a non-zero

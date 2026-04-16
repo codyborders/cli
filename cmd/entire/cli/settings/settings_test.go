@@ -524,6 +524,50 @@ func TestLoad_SummaryGenerationModelWithoutProviderRejected(t *testing.T) {
 	}
 }
 
+// TestLoad_MergedSettingsRejectsInvalidCombination verifies that the merged
+// result of base + local settings is validated, not just each file in
+// isolation. A base with no summary_generation and a local override that
+// sets only a model (no provider) produces a merged state that is invalid
+// per SummaryGenerationSettings.Validate(), and the load path must reject
+// it rather than letting it reach the provider-resolution code.
+func TestLoad_MergedSettingsRejectsInvalidCombination(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	entireDir := filepath.Join(tmpDir, ".entire")
+	if err := os.MkdirAll(entireDir, 0o755); err != nil {
+		t.Fatalf("failed to create .entire directory: %v", err)
+	}
+
+	// Base has no summary_generation at all.
+	settingsFile := filepath.Join(entireDir, "settings.json")
+	if err := os.WriteFile(settingsFile, []byte(`{"enabled": true}`), 0o644); err != nil {
+		t.Fatalf("failed to write settings file: %v", err)
+	}
+
+	// Local override sets only a model — invalid combination after merge.
+	localFile := filepath.Join(entireDir, "settings.local.json")
+	if err := os.WriteFile(localFile, []byte(`{"summary_generation": {"model": "sonnet"}}`), 0o644); err != nil {
+		t.Fatalf("failed to write local settings file: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o755); err != nil {
+		t.Fatalf("failed to create .git directory: %v", err)
+	}
+
+	t.Chdir(tmpDir)
+
+	_, err := Load(context.Background())
+	if err == nil {
+		t.Fatal("expected error for merged model-without-provider combination")
+	}
+	if !strings.Contains(err.Error(), "merged settings invalid") {
+		t.Fatalf("expected wrapped 'merged settings invalid' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "summary_generation.model") {
+		t.Fatalf("expected inner error to mention summary_generation.model, got: %v", err)
+	}
+}
+
 func TestSummaryGenerationSettings_Validate(t *testing.T) {
 	t.Parallel()
 

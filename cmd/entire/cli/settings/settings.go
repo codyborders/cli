@@ -165,6 +165,14 @@ func Load(ctx context.Context) (*EntireSettings, error) {
 		}
 	}
 
+	// Re-validate after merge. Individual files are validated by loadFromFile,
+	// but mergeJSON patches fields independently and can produce combinations
+	// (e.g. model without provider when the local override sets only a model
+	// on top of a base with no provider) that neither file alone contained.
+	if err := settings.SummaryGeneration.Validate(); err != nil {
+		return nil, fmt.Errorf("merged settings invalid: %w", err)
+	}
+
 	return settings, nil
 }
 
