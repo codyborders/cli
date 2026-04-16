@@ -361,7 +361,7 @@ func ListEligibleV2Generations(ctx context.Context) ([]CleanupItem, []string, er
 
 	cutoff := time.Now().AddDate(0, 0, -s.GetFullTranscriptGenerationRetentionDays())
 	cleanupItems := make([]CleanupItem, 0, len(archived))
-	warnings := make([]string, 0)
+	var warnings []string
 
 	for _, name := range archived {
 		refName := plumbing.ReferenceName(paths.V2FullRefPrefix + name)
