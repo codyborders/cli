@@ -38,6 +38,9 @@ type ClaudeError struct {
 
 func (e *ClaudeError) Error() string {
 	if e.Message == "" {
+		if e.ExitCode != 0 {
+			return fmt.Sprintf("claude CLI error (kind=%s, exit=%d)", e.Kind, e.ExitCode)
+		}
 		return fmt.Sprintf("claude CLI error (kind=%s)", e.Kind)
 	}
 	return fmt.Sprintf("claude CLI error (kind=%s): %s", e.Kind, e.Message)

@@ -46,6 +46,26 @@ func TestClaudeError_ErrorEmptyMessageFallback(t *testing.T) {
 	}
 }
 
+func TestClaudeError_ErrorEmptyMessageIncludesExitCode(t *testing.T) {
+	t.Parallel()
+	e := &ClaudeError{Kind: ClaudeErrorUnknown, ExitCode: 137}
+	s := e.Error()
+	want := "claude CLI error (kind=unknown, exit=137)"
+	if s != want {
+		t.Errorf("Error() = %q; want %q", s, want)
+	}
+}
+
+func TestClaudeError_ErrorEmptyMessageNegativeExitCode(t *testing.T) {
+	t.Parallel()
+	e := &ClaudeError{Kind: ClaudeErrorUnknown, ExitCode: -1}
+	s := e.Error()
+	want := "claude CLI error (kind=unknown, exit=-1)"
+	if s != want {
+		t.Errorf("Error() = %q; want %q", s, want)
+	}
+}
+
 func TestClaudeError_ErrorsAsIntegration(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("timeout")
