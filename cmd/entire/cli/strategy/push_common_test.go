@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1289,7 +1290,7 @@ func TestPrintCheckpointsV2OnlyMigrationHint(t *testing.T) {
 
 		// --force appears in exactly one line, so its count equals the number of
 		// invocations that actually emitted output.
-		forceCount := bytes.Count([]byte(output), []byte("--force"))
+		forceCount := strings.Count(output, "--force")
 		assert.Equal(t, 1, forceCount, "hint should print exactly once per process")
 	})
 }

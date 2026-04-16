@@ -1413,7 +1413,10 @@ func computeCompactTranscriptStart(ctx context.Context, ag agent.Agent, state *S
 // Callers decide whether to propagate or swallow the error (v2-only vs dual-write).
 func writeCommittedV2(ctx context.Context, repo *git.Repository, opts cpkg.WriteCommittedOptions) error {
 	v2Store := cpkg.NewV2GitStore(repo, ResolveCheckpointURL(ctx, "origin"))
-	return v2Store.WriteCommitted(ctx, opts)
+	if err := v2Store.WriteCommitted(ctx, opts); err != nil {
+		return fmt.Errorf("v2 write committed: %w", err)
+	}
+	return nil
 }
 
 // writeCommittedV2IfEnabled writes checkpoint data to v2 refs when checkpoints_v2

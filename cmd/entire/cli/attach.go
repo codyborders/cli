@@ -211,7 +211,10 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 // writeAttachCheckpointV2 writes attach-created checkpoints into the v2 refs.
 func writeAttachCheckpointV2(ctx context.Context, repo *git.Repository, opts cpkg.WriteCommittedOptions) error {
 	v2Store := cpkg.NewV2GitStore(repo, strategy.ResolveCheckpointURL(ctx, "origin"))
-	return v2Store.WriteCommitted(ctx, opts)
+	if err := v2Store.WriteCommitted(ctx, opts); err != nil {
+		return fmt.Errorf("v2 write committed: %w", err)
+	}
+	return nil
 }
 
 // getHeadCommit returns the HEAD commit object.
