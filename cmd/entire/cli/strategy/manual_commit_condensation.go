@@ -1048,6 +1048,7 @@ func (s *ManualCommitStrategy) CondenseSessionByID(ctx context.Context, sessionI
 	state.Phase = session.PhaseIdle
 	state.LastCheckpointID = checkpointID
 	state.AttributionBaseCommit = state.BaseCommit
+	state.DivergenceNoticeShown = false
 	state.PromptAttributions = nil
 	state.PendingPromptAttribution = nil
 
@@ -1155,6 +1156,7 @@ func (s *ManualCommitStrategy) CondenseAndMarkFullyCondensed(ctx context.Context
 	state.CompactTranscriptStart += result.CompactTranscriptLines
 	state.LastCheckpointID = checkpointID
 	state.AttributionBaseCommit = state.BaseCommit
+	state.DivergenceNoticeShown = false
 	state.PromptAttributions = nil
 	state.PendingPromptAttribution = nil
 	state.FullyCondensed = true // FilesTouched is already empty (checked above)
