@@ -248,18 +248,18 @@ func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPr
 	// Try origin first (fast treeless fetch, ~1-2s), then checkpoint_remote
 	// if configured and origin didn't have it. Fetch both v1 and v2 refs.
 	if len(matches) == 0 {
-		fetched := FetchMetadataTreeOnly(ctx) == nil
-		if !fetched {
-			fetched = FetchMetadataFromCheckpointRemote(ctx) == nil
+		anyFetched := FetchMetadataTreeOnly(ctx) == nil
+		if !anyFetched {
+			anyFetched = FetchMetadataFromCheckpointRemote(ctx) == nil
 		}
 		if preferCheckpointsV2 {
 			v2Fetched := FetchV2MainTreeOnly(ctx) == nil
 			if !v2Fetched {
 				v2Fetched = FetchV2MetadataFromCheckpointRemote(ctx) == nil
 			}
-			fetched = fetched || v2Fetched
+			anyFetched = anyFetched || v2Fetched
 		}
-		if fetched {
+		if anyFetched {
 			if freshRepo, repoErr := openRepository(ctx); repoErr == nil {
 				repo = freshRepo
 				v1Store = checkpoint.NewGitStore(repo)
