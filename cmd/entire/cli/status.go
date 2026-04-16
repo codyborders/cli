@@ -476,15 +476,6 @@ func currentHeadLinkage(ctx context.Context) (string, headLinkage, error) {
 	return repoRoot, head, nil
 }
 
-func (h headLinkage) hasCheckpointID(checkpointID string) bool {
-	for _, candidate := range h.checkpointIDs {
-		if candidate == checkpointID {
-			return true
-		}
-	}
-	return false
-}
-
 func computeSessionDivergenceWarnings(
 	repoRoot string,
 	active []*session.State,
