@@ -9,6 +9,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/agent/claudecode"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/testutil"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/stretchr/testify/require"
@@ -478,6 +479,7 @@ func TestDetectFileChanges_DeletedFilesWithNilPreState(t *testing.T) {
 	// This test verifies that DetectFileChanges detects deleted files
 	// even when previouslyUntracked is nil. Deleted file detection
 	// doesn't depend on pre-prompt state.
+	const trackedFileName = "tracked.txt"
 
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
@@ -489,7 +491,7 @@ func TestDetectFileChanges_DeletedFilesWithNilPreState(t *testing.T) {
 	}
 
 	// Create and commit a tracked file
-	trackedFile := filepath.Join(tmpDir, "tracked.txt")
+	trackedFile := filepath.Join(tmpDir, trackedFileName)
 	if err := os.WriteFile(trackedFile, []byte("tracked content"), 0o644); err != nil {
 		t.Fatalf("failed to write tracked file: %v", err)
 	}
@@ -499,7 +501,7 @@ func TestDetectFileChanges_DeletedFilesWithNilPreState(t *testing.T) {
 		t.Fatalf("failed to get worktree: %v", err)
 	}
 
-	if _, err := worktree.Add("tracked.txt"); err != nil {
+	if _, err := worktree.Add(trackedFileName); err != nil {
 		t.Fatalf("failed to add file: %v", err)
 	}
 
@@ -530,9 +532,9 @@ func TestDetectFileChanges_DeletedFilesWithNilPreState(t *testing.T) {
 
 	// Deleted should contain the deleted tracked file
 	if len(changes.Deleted) != 1 {
-		t.Errorf("DetectFileChanges(context.Background(),nil) Deleted = %v, want [tracked.txt]", changes.Deleted)
-	} else if changes.Deleted[0] != "tracked.txt" {
-		t.Errorf("DetectFileChanges(context.Background(),nil) Deleted[0] = %v, want tracked.txt", changes.Deleted[0])
+		t.Errorf("DetectFileChanges(context.Background(),nil) Deleted = %v, want [%s]", changes.Deleted, trackedFileName)
+	} else if changes.Deleted[0] != trackedFileName {
+		t.Errorf("DetectFileChanges(context.Background(),nil) Deleted[0] = %v, want %s", changes.Deleted[0], trackedFileName)
 	}
 }
 
@@ -750,14 +752,16 @@ func TestDetectFileChanges_IgnoresOpenCodeAgentFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	repo, err := git.PlainInit(tmpDir, false)
-	if err != nil {
-		t.Fatalf("failed to init repo: %v", err)
-	}
+	testutil.InitRepo(t, tmpDir)
 
 	trackedFile := filepath.Join(tmpDir, "tracked.txt")
 	if err := os.WriteFile(trackedFile, []byte("content"), 0o644); err != nil {
 		t.Fatalf("failed to write tracked file: %v", err)
+	}
+
+	repo, err := git.PlainOpen(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open repo: %v", err)
 	}
 
 	worktree, err := repo.Worktree()

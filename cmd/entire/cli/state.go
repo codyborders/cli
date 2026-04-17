@@ -233,11 +233,11 @@ func shouldIgnoreSessionTrackingPath(relPath string) bool {
 		return true
 	}
 
-	// OpenCode uses a repo-root config file in addition to its protected
-	// directory. If pre-prompt state is missing, this file would otherwise be
-	// misattributed as agent work and keep shadow branches alive.
-	if cleanPath == "opencode.json" {
-		return true
+	for _, file := range agent.AllProtectedFiles() {
+		cleanFile := filepath.Clean(filepath.FromSlash(file))
+		if cleanPath == cleanFile {
+			return true
+		}
 	}
 
 	for _, dir := range agent.AllProtectedDirs() {
