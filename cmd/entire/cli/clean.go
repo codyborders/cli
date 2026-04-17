@@ -33,8 +33,9 @@ Use --all to clean all Entire session data across the repository:
   - Temporary files (.entire/tmp/)`
 
 	if settings.IsCheckpointsV2Enabled(ctx) {
-		description += `
-  - Eligible archived checkpoints v2 full-transcript generations`
+		defaultRetentionDays := (&settings.EntireSettings{}).GetFullTranscriptGenerationRetentionDays()
+		description += fmt.Sprintf(`
+  - Archived v2 full transcripts older than the %d-day retention window`, defaultRetentionDays)
 	}
 
 	description += `
