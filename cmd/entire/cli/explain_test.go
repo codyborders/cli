@@ -147,6 +147,8 @@ func TestFormatCheckpointSummaryError_Unknown(t *testing.T) {
 	}{
 		{"APIStatus when Message empty", &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorUnknown, APIStatus: 500}, "500"},
 		{"ExitCode when Message empty", &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorUnknown, ExitCode: 137}, "137"},
+		{"Negative ExitCode renders as abnormal, not -1", &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorUnknown, ExitCode: -1}, "abnormal"},
+		{"All-zero fields render a diagnostic sentinel, not empty", &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorUnknown}, "no diagnostic detail"},
 		{"Message takes precedence", &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorUnknown, Message: "something weird"}, "something weird"},
 	}
 	for _, tc := range tests {

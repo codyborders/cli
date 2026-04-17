@@ -623,7 +623,9 @@ func formatCheckpointSummaryError(err error, deadline time.Duration) error {
 // so the user never sees a bare "Claude failed to generate the summary:"
 // with nothing after the colon (which happens when Claude returns
 // is_error:true with result:null, or when the subprocess crashes with no
-// stderr output).
+// stderr output). ExitCode < 0 means the subprocess did not produce a real
+// exit code (e.g. launch failure) — render that as "abnormal termination"
+// rather than the misleading "exited with code -1".
 func formatClaudeErrorSuffix(e *claudecode.ClaudeError) string {
 	if e.Message != "" {
 		return ": " + e.Message
@@ -631,10 +633,12 @@ func formatClaudeErrorSuffix(e *claudecode.ClaudeError) string {
 	switch {
 	case e.APIStatus != 0:
 		return fmt.Sprintf(" (Anthropic API returned HTTP %d)", e.APIStatus)
-	case e.ExitCode != 0:
+	case e.ExitCode > 0:
 		return fmt.Sprintf(" (claude CLI exited with code %d)", e.ExitCode)
+	case e.ExitCode < 0:
+		return " (claude CLI terminated abnormally — no exit code captured)"
 	default:
-		return ""
+		return " (no diagnostic detail available from Claude CLI)"
 	}
 }
 
