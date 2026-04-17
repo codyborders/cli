@@ -36,10 +36,6 @@ Use --all to clean all Entire session data across the repository:
 	if err == nil && s.IsCheckpointsV2Enabled() {
 		description += fmt.Sprintf(`
   - Archived v2 full transcripts older than the configured %d-day retention window`, s.GetFullTranscriptGenerationRetentionDays())
-	} else if settings.IsCheckpointsV2Enabled(ctx) {
-		defaultRetentionDays := (&settings.EntireSettings{}).GetFullTranscriptGenerationRetentionDays()
-		description += fmt.Sprintf(`
-  - Archived v2 full transcripts older than the default %d-day retention window`, defaultRetentionDays)
 	}
 
 	description += `
