@@ -20,6 +20,7 @@ type DeclaredCaps struct {
 	TranscriptAnalyzer     bool `json:"transcript_analyzer"`
 	TranscriptPreparer     bool `json:"transcript_preparer"`
 	TokenCalculator        bool `json:"token_calculator"`
+	CompactTranscript      bool `json:"compact_transcript"`
 	TextGenerator          bool `json:"text_generator"`
 	HookResponseWriter     bool `json:"hook_response_writer"`
 	SubagentAwareExtractor bool `json:"subagent_aware_extractor"`
@@ -103,6 +104,22 @@ func AsTextGenerator(ag Agent) (TextGenerator, bool) { //nolint:ireturn // type-
 		return tg, cd.DeclaredCapabilities().TextGenerator
 	}
 	return tg, true
+}
+
+// AsTranscriptCompactor returns the agent as TranscriptCompactor if it both
+// implements the interface and (for CapabilityDeclarer agents) has declared the capability.
+func AsTranscriptCompactor(ag Agent) (TranscriptCompactor, bool) { //nolint:ireturn // type-assertion helper must return interface
+	if ag == nil {
+		return nil, false
+	}
+	tc, ok := ag.(TranscriptCompactor)
+	if !ok {
+		return nil, false
+	}
+	if cd, ok := ag.(CapabilityDeclarer); ok {
+		return tc, cd.DeclaredCapabilities().CompactTranscript
+	}
+	return tc, true
 }
 
 // AsHookResponseWriter returns the agent as HookResponseWriter if it both

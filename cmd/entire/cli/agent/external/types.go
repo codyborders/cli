@@ -4,6 +4,7 @@
 package external
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -102,6 +103,52 @@ type TokenUsageResponse struct {
 // GenerateTextResponse is the JSON returned by the "generate-text" subcommand.
 type GenerateTextResponse struct {
 	Text string `json:"text"`
+}
+
+// CompactTranscriptResponse is the JSON returned by the "compact-transcript" subcommand.
+type CompactTranscriptResponse struct {
+	Transcript string                            `json:"transcript"`
+	Assets     []CompactTranscriptAssetResponse  `json:"assets,omitempty"`
+}
+
+// CompactTranscriptAssetResponse describes one extracted binary asset.
+type CompactTranscriptAssetResponse struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+func (r *CompactTranscriptResponse) toCompactedTranscript() (*agent.CompactedTranscript, error) {
+	if r.Transcript == "" {
+		return nil, fmt.Errorf("compact-transcript: missing transcript")
+	}
+
+	transcript, err := base64.StdEncoding.DecodeString(r.Transcript)
+	if err != nil {
+		return nil, fmt.Errorf("compact-transcript: decode transcript base64: %w", err)
+	}
+
+	result := &agent.CompactedTranscript{
+		Transcript: transcript,
+	}
+	if len(r.Assets) == 0 {
+		return result, nil
+	}
+
+	result.Assets = make([]agent.CompactedTranscriptAsset, 0, len(r.Assets))
+	for _, asset := range r.Assets {
+		data, decodeErr := base64.StdEncoding.DecodeString(asset.Data)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("compact-transcript: decode asset %q base64: %w", asset.Name, decodeErr)
+		}
+		result.Assets = append(result.Assets, agent.CompactedTranscriptAsset{
+			Name:      asset.Name,
+			MediaType: asset.MediaType,
+			Data:      data,
+		})
+	}
+
+	return result, nil
 }
 
 // AgentSessionJSON is the JSON representation of agent.AgentSession for stdin/stdout transfer.
