@@ -130,6 +130,17 @@ type State struct {
 	// sessions that have been condensed at least once. Cleared on new prompt.
 	LastCheckpointID id.CheckpointID `json:"last_checkpoint_id,omitempty"`
 
+	// LastCheckpointCommitHash is the exact commit SHA that carried
+	// LastCheckpointID at condensation time. Used by the reconcile path to
+	// distinguish "reset back to the condensed commit" (same SHA) from
+	// "cherry-picked / rebased a commit that happens to preserve the trailer"
+	// (different SHA). Without this guard, a cherry-picked checkpoint would
+	// falsely fire reconcile and drop the pinned AttributionBaseCommit,
+	// corrupting attribution math for uncondensed shadow-branch work.
+	// Empty for legacy state files — reconcile falls back to trailer-only
+	// matching for backward compatibility.
+	LastCheckpointCommitHash string `json:"last_checkpoint_commit_hash,omitempty"`
+
 	// FullyCondensed indicates this session has been condensed and has no remaining
 	// carry-forward files. PostCommit skips fully-condensed sessions entirely.
 	// Set after successful condensation when no files remain for carry-forward

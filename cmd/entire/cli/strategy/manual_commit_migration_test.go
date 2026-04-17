@@ -67,6 +67,46 @@ func TestMigrateShadowBranch_ReconcilePath(t *testing.T) {
 	assert.True(t, testutil.BranchExists(t, dir, oldShadowName), "old shadow branch should be preserved")
 }
 
+// TestMigrateShadowBranch_CherryPickedCheckpointDoesNotTriggerReconcile
+// verifies that a cherry-picked or rebased commit which *preserves* the
+// session's LastCheckpointID trailer (same message, different SHA) does NOT
+// fire the reconcile path. Only a reset back to the exact condensed commit
+// should reconcile; cherry-pick creates a new SHA and must go through the
+// migrate path so AttributionBaseCommit stays pinned.
+func TestMigrateShadowBranch_CherryPickedCheckpointDoesNotTriggerReconcile(t *testing.T) {
+	dir, initHash := setupMigrationRepo(t)
+	t.Chdir(dir)
+
+	cpID := checkpointID.MustCheckpointID("abc123def456")
+
+	// HEAD carries the matching trailer but is a DIFFERENT SHA from the one
+	// recorded at condensation time (LastCheckpointCommitHash). This is the
+	// cherry-pick / rebase scenario.
+	testutil.WriteFile(t, dir, "file.txt", "content")
+	testutil.GitAdd(t, dir, "file.txt")
+	testutil.GitCommit(t, dir, "cherry-picked commit\n\nEntire-Checkpoint: abc123def456")
+
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	state := &SessionState{
+		SessionID:                "test-session-cherry-pick",
+		BaseCommit:               initHash,
+		AttributionBaseCommit:    "original-pinned-attribution",
+		LastCheckpointID:         cpID,
+		LastCheckpointCommitHash: "0000000000000000000000000000000000000042", // distinct from HEAD
+	}
+
+	s := &ManualCommitStrategy{}
+	_, reconciled, err := s.migrateShadowBranchIfNeeded(context.Background(), repo, state)
+	require.NoError(t, err)
+
+	assert.False(t, reconciled,
+		"cherry-pick preserving the trailer must NOT fire reconcile (HEAD SHA != LastCheckpointCommitHash); reconcile would drop the pinned AttributionBaseCommit and corrupt attribution math for uncondensed shadow-branch work")
+	assert.Equal(t, "original-pinned-attribution", state.AttributionBaseCommit,
+		"AttributionBaseCommit pin must survive a cherry-picked checkpoint trailer (migrate path preserves it; reconcile would not)")
+}
+
 // TestMigrateShadowBranch_ReconcileClearsDivergenceFlag verifies that the reconcile
 // path also clears DivergenceNoticeShown. Without this, a session that warned about
 // divergence, got reset back to a known checkpoint, and later diverged again would

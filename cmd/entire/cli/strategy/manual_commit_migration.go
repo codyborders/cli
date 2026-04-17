@@ -45,32 +45,48 @@ func (s *ManualCommitStrategy) migrateShadowBranchIfNeeded(ctx context.Context, 
 		return false, false, nil // No migration needed
 	}
 
-	// Reconcile path: if HEAD sits on a commit carrying this session's
-	// LastCheckpointID as an Entire-Checkpoint trailer, the user has reset
-	// back to the last condensed checkpoint. Update both BaseCommit and
-	// AttributionBaseCommit to HEAD. Deliberately do NOT rename or touch
-	// the old shadow branch — it preserves rewind data from the
-	// discarded segment of history.
+	// Reconcile path: if HEAD sits on the exact commit carrying this session's
+	// LastCheckpointID, the user has reset back to the last condensed
+	// checkpoint. Update both BaseCommit and AttributionBaseCommit to HEAD.
+	// Deliberately do NOT rename or touch the old shadow branch — it
+	// preserves rewind data from the discarded segment of history.
+	//
+	// The SHA guard (currentHead == LastCheckpointCommitHash) distinguishes a
+	// true reset from a cherry-pick/rebase that merely preserved the trailer.
+	// Cherry-picking a checkpoint commit creates a new SHA with the same
+	// message; firing reconcile in that case would drop the pinned
+	// AttributionBaseCommit and corrupt attribution for uncondensed work.
+	// Legacy state files without LastCheckpointCommitHash fall back to
+	// trailer-only matching for backward compatibility.
 	if !state.LastCheckpointID.IsEmpty() {
-		headCommit, commitErr := repo.CommitObject(head.Hash())
-		if commitErr == nil {
-			for _, cpID := range trailers.ParseAllCheckpoints(headCommit.Message) {
-				if cpID.String() == state.LastCheckpointID.String() {
-					state.BaseCommit = currentHead
-					state.RealignAttributionBase(currentHead)
-					logging.Info(logging.WithComponent(ctx, "migration"), "reconciled session to known checkpoint on HEAD",
-						slog.String("checkpoint_id", state.LastCheckpointID.String()),
-						slog.String("new_base", currentHead[:7]))
-					return true, true, nil
-				}
-			}
-		} else {
-			logging.Warn(logging.WithComponent(ctx, "migration"), "could not load HEAD commit for reconcile check, falling through to migrate",
+		shaMismatch := state.LastCheckpointCommitHash != "" && state.LastCheckpointCommitHash != currentHead
+		if shaMismatch {
+			// Trailer may still be present via cherry-pick/rebase, but the
+			// SHA doesn't match what we condensed into — fall through to migrate.
+			logging.Debug(logging.WithComponent(ctx, "migration"), "reconcile skipped: HEAD SHA does not match LastCheckpointCommitHash",
 				slog.String("head", currentHead[:7]),
-				slog.String("error", commitErr.Error()))
+				slog.String("expected", state.LastCheckpointCommitHash[:7]))
+		} else {
+			headCommit, commitErr := repo.CommitObject(head.Hash())
+			if commitErr == nil {
+				for _, cpID := range trailers.ParseAllCheckpoints(headCommit.Message) {
+					if cpID.String() == state.LastCheckpointID.String() {
+						state.BaseCommit = currentHead
+						state.RealignAttributionBase(currentHead)
+						logging.Info(logging.WithComponent(ctx, "migration"), "reconciled session to known checkpoint on HEAD",
+							slog.String("checkpoint_id", state.LastCheckpointID.String()),
+							slog.String("new_base", currentHead[:7]))
+						return true, true, nil
+					}
+				}
+			} else {
+				logging.Warn(logging.WithComponent(ctx, "migration"), "could not load HEAD commit for reconcile check, falling through to migrate",
+					slog.String("head", currentHead[:7]),
+					slog.String("error", commitErr.Error()))
+			}
 		}
-		// If CommitObject failed or no trailer matched, fall through to the
-		// existing migrate path below.
+		// If SHA guard blocked, CommitObject failed, or no trailer matched,
+		// fall through to the existing migrate path below.
 	}
 
 	changed, err := s.migrateShadowBranchToBaseCommit(ctx, repo, state, currentHead)
