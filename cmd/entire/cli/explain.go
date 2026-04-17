@@ -567,11 +567,15 @@ func generateCheckpointAISummary(ctx context.Context, scopedTranscript []byte, f
 	// scopedTranscript is read from checkpoint storage, which redacts on write.
 	summary, err := generateTranscriptSummary(timeoutCtx, redact.AlreadyRedacted(scopedTranscript), filesTouched, agentType, generator)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(timeoutCtx.Err(), context.Canceled) {
-			return nil, fmt.Errorf("summary generation canceled: %w", context.Canceled)
+		// Only classify as ctx cancel/deadline when the error chain actually
+		// contains the sentinel. Relying on timeoutCtx.Err() here loses typed
+		// errors (e.g. *ClaudeError) when the subprocess returned a real
+		// structured failure and the deadline happened to fire concurrently.
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("summary generation canceled: %w", err)
 		}
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("summary generation timed out after %s: %w", formatSummaryTimeout(timeoutDuration), context.DeadlineExceeded)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("summary generation timed out after %s: %w", formatSummaryTimeout(timeoutDuration), err)
 		}
 		return nil, err
 	}

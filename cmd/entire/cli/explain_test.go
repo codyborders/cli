@@ -284,6 +284,47 @@ func TestGenerateCheckpointAISummary_UsesParentDeadlineAndWrapsSentinel(t *testi
 	}
 }
 
+// TestGenerateCheckpointAISummary_PreservesClaudeErrorWhenCtxIsDone guards
+// against the race where the underlying summarizer returns a typed
+// *ClaudeError AND the context happens to be done. Prior code checked
+// timeoutCtx.Err() and unconditionally wrapped with %w context.DeadlineExceeded,
+// which discarded the typed error and routed the user to the wrong
+// "safety deadline" guidance instead of the auth/rate-limit message.
+func TestGenerateCheckpointAISummary_PreservesClaudeErrorWhenCtxIsDone(t *testing.T) {
+	tmpTimeout := checkpointSummaryTimeout
+	tmpGenerator := generateTranscriptSummary
+	t.Cleanup(func() {
+		checkpointSummaryTimeout = tmpTimeout
+		generateTranscriptSummary = tmpGenerator
+	})
+
+	checkpointSummaryTimeout = 30 * time.Second
+
+	// Cancel the parent before we even call — ctx.Err() will be non-nil.
+	parentCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	claudeErr := &claudecode.ClaudeError{Kind: claudecode.ClaudeErrorAuth, Message: "Invalid API key"}
+	generateTranscriptSummary = func(
+		context.Context,
+		redact.RedactedBytes,
+		[]string,
+		types.AgentType,
+		summarize.Generator,
+	) (*checkpoint.Summary, error) {
+		return nil, claudeErr
+	}
+
+	_, err := generateCheckpointAISummary(parentCtx, []byte("transcript"), nil, agent.AgentTypeClaudeCode, nil)
+	var ce *claudecode.ClaudeError
+	if !errors.As(err, &ce) {
+		t.Fatalf("errors.As did not recover *ClaudeError; got %v", err)
+	}
+	if ce.Kind != claudecode.ClaudeErrorAuth {
+		t.Errorf("Kind = %v; want auth", ce.Kind)
+	}
+}
+
 func TestGenerateCheckpointAISummary_ClampsLongParentDeadlineToDefaultTimeout(t *testing.T) {
 	tmpTimeout := checkpointSummaryTimeout
 	tmpGenerator := generateTranscriptSummary
