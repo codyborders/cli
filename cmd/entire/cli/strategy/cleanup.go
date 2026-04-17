@@ -343,12 +343,7 @@ func DeleteOrphanedCheckpoints(ctx context.Context, checkpointIDs []string) (del
 // ListEligibleV2Generations returns archived checkpoints v2 /full/* generations
 // eligible for deletion based on the configured retention window, along with
 // warnings for malformed generations that were skipped.
-func ListEligibleV2Generations(ctx context.Context) ([]CleanupItem, []string, error) {
-	s, err := settings.Load(ctx)
-	if err != nil {
-		return []CleanupItem{}, nil, nil //nolint:nilerr // settings unavailable — nothing to clean without config
-	}
-
+func ListEligibleV2Generations(ctx context.Context, s *settings.EntireSettings) ([]CleanupItem, []string, error) {
 	repo, err := OpenRepository(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open git repository: %w", err)

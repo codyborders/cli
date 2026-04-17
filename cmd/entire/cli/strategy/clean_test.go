@@ -10,6 +10,7 @@ import (
 
 	"github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
+	"github.com/entireio/cli/cmd/entire/cli/settings"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 
 	"github.com/go-git/go-git/v6"
@@ -270,6 +271,31 @@ func TestRefStateCLI_ReturnsCurrentOID(t *testing.T) {
 	}
 	if oid != commitHash.String() {
 		t.Fatalf("refStateCLI() oid = %q, want %q", oid, commitHash.String())
+	}
+}
+
+func TestListEligibleV2Generations_UsesProvidedSettings(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitRepo(t, dir)
+
+	t.Chdir(dir)
+
+	s := &settings.EntireSettings{
+		StrategyOptions: map[string]any{
+			"checkpoints_v2": true,
+			"full_transcript_generation_retention_days": 14,
+		},
+	}
+
+	items, warnings, err := ListEligibleV2Generations(context.Background(), s)
+	if err != nil {
+		t.Fatalf("ListEligibleV2Generations() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("ListEligibleV2Generations() items = %d, want 0", len(items))
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("ListEligibleV2Generations() warnings = %d, want 0", len(warnings))
 	}
 }
 

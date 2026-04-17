@@ -703,6 +703,31 @@ func TestCleanCmd_All_NotGitRepository(t *testing.T) {
 	}
 }
 
+func TestCleanCmd_All_InvalidSettingsReturnsError(t *testing.T) {
+	repo, _ := setupCleanTestRepo(t)
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("failed to get worktree: %v", err)
+	}
+	repoRoot := wt.Filesystem.Root()
+
+	writeCleanSettingsFile(t, repoRoot, `{"enabled": true,`)
+
+	cmd := newCleanCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--all", "--dry-run"})
+
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("clean --all --dry-run should return error for invalid settings")
+	}
+	if !strings.Contains(err.Error(), "failed to load settings") {
+		t.Fatalf("expected failed to load settings error, got: %v", err)
+	}
+}
+
 func TestCleanCmd_All_Subdirectory(t *testing.T) {
 	repo, commitHash := setupCleanTestRepo(t)
 

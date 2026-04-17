@@ -272,14 +272,19 @@ func runCleanSession(ctx context.Context, cmd *cobra.Command, strat *strategy.Ma
 
 // runCleanAll cleans all session data across the repository.
 func runCleanAll(ctx context.Context, cmd *cobra.Command, force, dryRun bool) error {
+	s, err := settings.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
 	// List all items (sessions, shadow branches) — not just orphaned ones
 	items, err := strategy.ListAllItems(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list items: %w", err)
 	}
 
-	if settings.IsCheckpointsV2Enabled(ctx) {
-		v2Items, warnings, err := strategy.ListEligibleV2Generations(ctx)
+	if s.IsCheckpointsV2Enabled() {
+		v2Items, warnings, err := strategy.ListEligibleV2Generations(ctx, s)
 		if err != nil {
 			return fmt.Errorf("failed to list v2 generations: %w", err)
 		}
