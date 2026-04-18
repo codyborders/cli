@@ -54,6 +54,7 @@ Returns agent metadata and declared capabilities.
   "capabilities": {
     "hooks": true,
     "transcript_analyzer": true,
+    "compact_transcript": true,
     "transcript_preparer": false,
     "token_calculator": false,
     "text_generator": false,
@@ -316,6 +317,72 @@ Prepares/processes a transcript file (e.g., converting from raw format).
 - `--session-ref` — Path to the transcript file
 
 **Output:** Exit 0 on success.
+
+### Capability: `compact_transcript`
+
+Required when `capabilities.compact_transcript` is `true`.
+
+#### `compact-transcript --session-ref <path>`
+
+Builds a compact transcript representation for checkpoints v2.
+
+**Arguments:**
+- `--session-ref` — Path to the transcript file
+
+**Output (stdout):** JSON
+
+```json
+{
+  "transcript": "eyJ0eXBlIjoiLi4uIn0K",
+  "assets": [
+    {
+      "name": "image-1.png",
+      "media_type": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAA..."
+    }
+  ]
+}
+```
+
+The `transcript` field is required and must contain base64-encoded `transcript.jsonl` bytes.
+
+Those bytes must be the compact **Entire Transcript Format** JSONL expected by checkpoints v2:
+
+- UTF-8 JSONL, written byte-for-byte by the CLI to `transcript.jsonl`
+- First line: a header object declaring the format version and source agent, for example:
+
+```json
+{"v":1,"agent":"cursor","cli_version":"0.42.0"}
+```
+
+- Subsequent lines: normalized conversation entries, each also carrying `"v":1`
+- Supported entry types are currently:
+  - `user`
+  - `user_tool_result`
+  - `assistant`
+
+Examples:
+
+```json
+{"v":1,"type":"user","ts":"2026-01-13T12:00:00Z","content":"Fix the login bug"}
+{"v":1,"type":"user_tool_result","ts":"2026-01-13T12:00:01Z","tool_use_id":"toolu_123","result":{"type":"text","file":"src/main.go"}}
+{"v":1,"type":"assistant","ts":"2026-01-13T12:00:02Z","id":"msg_123","content":[{"type":"text","text":"I updated the file."},{"type":"tool_use","id":"toolu_123","name":"Read","input":{"file_path":"src/main.go"}}]}
+```
+
+The compact transcript should exclude agent-native envelope/progress/system noise and retain only the normalized content needed by Entire's checkpoint readers.
+
+The optional `assets` field is reserved for externalized checkpoint assets. Each asset object contains:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Asset filename |
+| `media_type` | string | MIME type for the asset |
+| `data` | string | Base64-encoded asset bytes |
+
+Current CLI behavior:
+- If `compact_transcript` is missing or `false`, the CLI will skip compact transcript generation for that external agent, fall back to raw transcript storage, and log a warning.
+- If `compact-transcript` fails or returns invalid output, the CLI will also fall back to raw transcript storage and log a warning.
+- If `assets` are returned, the CLI accepts them in the protocol shape but currently ignores them for storage and read paths.
 
 ### Capability: `token_calculator`
 
