@@ -93,36 +93,53 @@ const (
 	visibilityInternal = "internal"
 )
 
-// runGitHubBootstrap handles the "enable on a non-git folder" flow. On
-// success the current directory is a git repo with at least one commit (and
-// optionally a GitHub remote). Returns errBootstrapDeclined if the user
-// declined, in which case the caller should fall back to the legacy
-// "not a git repository" error.
-func runGitHubBootstrap(ctx context.Context, w, errW io.Writer, opts GitHubBootstrapOptions) error {
-	return runGitHubBootstrapWith(ctx, w, errW, opts, execRunner{})
+// bootstrapState carries pre-setup decisions into the post-setup finalize
+// step. The caller runs `runGitHubBootstrapInit` before agent setup to do
+// `git init` + identity + gather GitHub choices, then runs
+// `runGitHubBootstrapFinalize` afterwards so the initial commit captures
+// the `.entire/`, `.claude/`, etc. files written during setup.
+type bootstrapState struct {
+	runner     bootstrapRunner
+	cwd        string
+	useGitHub  bool
+	fullName   string // owner/name, if useGitHub
+	visibility string // public/private/internal, if useGitHub
+	message    string // resolved initial commit message
 }
 
-// runGitHubBootstrapWith is the testable entry point that accepts a runner.
-func runGitHubBootstrapWith(ctx context.Context, w, errW io.Writer, opts GitHubBootstrapOptions, runner bootstrapRunner) error {
+// runGitHubBootstrapInit handles the pre-setup half of "enable on a non-git
+// folder": confirm + `git init`, ensure git identity, and (if we're going
+// to create a GitHub repo) gather owner/name/visibility up front so all
+// prompts happen before agent setup runs.
+//
+// Returns errBootstrapDeclined if the user declined the init prompt.
+// Returns nil, nil if the caller is already inside a git repo and no
+// bootstrap is needed (defensive; the caller typically gates on this).
+func runGitHubBootstrapInit(ctx context.Context, w, errW io.Writer, opts GitHubBootstrapOptions) (*bootstrapState, error) {
+	return runGitHubBootstrapInitWith(ctx, w, errW, opts, execRunner{})
+}
+
+// runGitHubBootstrapInitWith is the testable variant that accepts a runner.
+func runGitHubBootstrapInitWith(ctx context.Context, w, errW io.Writer, opts GitHubBootstrapOptions, runner bootstrapRunner) (*bootstrapState, error) {
 	// paths.RepoRoot is unavailable here — we're bootstrapping _before_ a
 	// repo exists. Plain cwd is the correct target for `git init`.
 	cwd, err := os.Getwd() //nolint:forbidigo // no repo yet; git init runs in cwd
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return nil, fmt.Errorf("get working directory: %w", err)
 	}
 
 	// Step 1: confirm we should git init here.
 	proceed, err := confirmInitRepo(w, cwd, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !proceed {
-		return errBootstrapDeclined
+		return nil, errBootstrapDeclined
 	}
 
 	// Step 2: git init.
 	if err := gitInit(ctx, runner, cwd); err != nil {
-		return fmt.Errorf("git init: %w", err)
+		return nil, fmt.Errorf("git init: %w", err)
 	}
 	// Clear cached worktree root so subsequent paths.WorktreeRoot calls pick
 	// up the freshly created repo.
@@ -130,8 +147,8 @@ func runGitHubBootstrapWith(ctx context.Context, w, errW io.Writer, opts GitHubB
 	fmt.Fprintln(w, "Initialized empty Git repository.")
 
 	// Step 3: decide whether to create a GitHub repo. If gh is missing or the
-	// user passed --no-github, we skip that branch but still do the initial
-	// commit so the local repo is usable.
+	// user passed --no-github, we skip that branch but still bootstrap the
+	// local repo.
 	useGitHub := !opts.NoGitHub
 	if useGitHub {
 		if !ghAvailable(ctx, runner) {
@@ -145,44 +162,69 @@ func runGitHubBootstrapWith(ctx context.Context, w, errW io.Writer, opts GitHubB
 		}
 	}
 
-	// Step 4: collect GitHub repo details (if we're going to use GitHub).
+	// Step 4: collect GitHub repo details up front so all prompts are
+	// contiguous.
 	var fullName, visibility string
 	if useGitHub {
 		owner, name, vis, err := selectGitHubRepo(ctx, w, errW, runner, cwd, opts)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		fullName = owner + "/" + name
 		visibility = vis
 	}
 
-	// Step 5: initial commit. First ensure the repo has a git identity
-	// configured, then stage+commit with signing disabled so the bootstrap
-	// doesn't fail on fresh machines without a global git config or a
-	// working GPG signer.
+	// Step 5: resolve commit message and ensure git identity. Must run after
+	// `git init` so `git config` reads are scoped correctly.
 	message, err := resolveCommitMessage(w, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureGitIdentity(ctx, w, errW, runner, cwd); err != nil {
+		return nil, err
+	}
+
+	return &bootstrapState{
+		runner:     runner,
+		cwd:        cwd,
+		useGitHub:  useGitHub,
+		fullName:   fullName,
+		visibility: visibility,
+		message:    message,
+	}, nil
+}
+
+// runGitHubBootstrapWith runs the full bootstrap (init + finalize) in one
+// call, used by tests that don't need to assert phasing. The real caller
+// runs the two phases around agent setup.
+func runGitHubBootstrapWith(ctx context.Context, w, errW io.Writer, opts GitHubBootstrapOptions, runner bootstrapRunner) error {
+	state, err := runGitHubBootstrapInitWith(ctx, w, errW, opts, runner)
 	if err != nil {
 		return err
 	}
-	if err := ensureGitIdentity(ctx, w, errW, runner, cwd); err != nil {
-		return err
+	return runGitHubBootstrapFinalize(ctx, w, state)
+}
+
+// runGitHubBootstrapFinalize runs the post-setup half: stage + initial
+// commit (now including any `.entire/`, agent hook, and settings files
+// written by the enable flow), then create the GitHub repo and push.
+func runGitHubBootstrapFinalize(ctx context.Context, w io.Writer, s *bootstrapState) error {
+	if s == nil {
+		return nil
 	}
-	committed, err := doInitialCommit(ctx, runner, cwd, message)
+	committed, err := doInitialCommit(ctx, s.runner, s.cwd, s.message)
 	if err != nil {
 		return fmt.Errorf("initial commit: %w", err)
 	}
 	if !committed {
 		fmt.Fprintln(w, "No files to commit; skipping initial commit.")
 	}
-
-	// Step 6: create GitHub repo and push.
-	if useGitHub {
-		if err := ghRepoCreate(ctx, runner, cwd, fullName, visibility, committed); err != nil {
+	if s.useGitHub {
+		if err := ghRepoCreate(ctx, s.runner, s.cwd, s.fullName, s.visibility, committed); err != nil {
 			return fmt.Errorf("gh repo create: %w", err)
 		}
-		fmt.Fprintf(w, "Created GitHub repository %s.\n", fullName)
+		fmt.Fprintf(w, "Created GitHub repository %s.\n", s.fullName)
 	}
-
 	return nil
 }
 

@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	testUser = "octocat"
-	cmdGit   = "git"
+	testUser     = "octocat"
+	cmdGit       = "git"
+	ghSubcmdRepo = "repo"
+	ghActCreate  = "create"
 )
 
 func TestSlugifyRepoName(t *testing.T) {
@@ -440,7 +442,7 @@ func TestRunGitHubBootstrap_FullNonInteractive(t *testing.T) {
 	}
 
 	if !r.hasCall(func(c fakeCall) bool {
-		return c.name == "gh" && len(c.args) > 3 && c.args[0] == "repo" && c.args[1] == "create"
+		return c.name == "gh" && len(c.args) > 3 && c.args[0] == ghSubcmdRepo && c.args[1] == ghActCreate
 	}) {
 		t.Fatal("expected gh repo create call")
 	}
@@ -473,6 +475,96 @@ func TestRunGitHubBootstrap_RepoExistsFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected 'already exists' error, got %v", err)
+	}
+}
+
+// TestRunGitHubBootstrap_InitBeforeFinalize verifies the two-phase split:
+// init runs git init up front, finalize creates the commit + pushes. A
+// simulated "agent setup" step writes a file between the phases; that
+// file must end up in the initial commit (i.e. `git add -A` happens
+// after setup, not before).
+func TestRunGitHubBootstrap_InitBeforeFinalize(t *testing.T) {
+	t.Setenv("ENTIRE_TEST_TTY", "0")
+	dir := t.TempDir()
+	restoreCwd(t, dir)
+
+	r := newFakeRunner()
+	r.setIdentityConfigured()
+	r.set("gh", []string{"--version"}, "gh", nil)
+	r.set("gh", []string{"auth", "status"}, "ok", nil)
+	r.set("gh", []string{"api", "user", "--jq", ".login"}, "octocat\n", nil)
+	r.set("gh", []string{"api", "user/orgs", "--jq", ".[].login"}, "", nil)
+	r.set("gh", []string{"repo", "view", "octocat/phased", "--json", "name"}, "", errors.New("not found"))
+	r.set("git", []string{"init"}, "", nil)
+	r.set("git", []string{"add", "-A"}, "", nil)
+	r.set("git", []string{"status", "--porcelain"}, " A .entire/settings.json\n", nil)
+	r.set("git", []string{"-c", "commit.gpgsign=false", "commit", "-m", "First"}, "", nil)
+	r.setInteractive("gh", []string{
+		"repo", "create", "octocat/phased",
+		"--private",
+		"--source=.",
+		"--remote=origin",
+		"--push",
+	}, nil)
+
+	opts := GitHubBootstrapOptions{
+		InitRepo:             true,
+		RepoName:             "phased",
+		RepoVisibility:       "private",
+		InitialCommitMessage: "First",
+	}
+
+	// Phase 1: init. This must NOT call git add/commit/ gh repo create.
+	state, err := runGitHubBootstrapInitWith(context.Background(), io.Discard, io.Discard, opts, r)
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	if state == nil {
+		t.Fatal("expected non-nil state after init")
+	}
+	forbidden := [][]string{
+		{"add", "-A"},
+		{"status", "--porcelain"},
+		{"-c", "commit.gpgsign=false", "commit", "-m", "First"},
+	}
+	for _, args := range forbidden {
+		if r.hasCall(argsMatch("git", args)) {
+			t.Fatalf("git %v was called during init; should have been deferred to finalize", args)
+		}
+	}
+	if r.hasCall(func(c fakeCall) bool {
+		return c.name == "gh" && len(c.args) >= 2 && c.args[0] == ghSubcmdRepo && c.args[1] == ghActCreate
+	}) {
+		t.Fatal("gh repo create was called during init; should have been deferred to finalize")
+	}
+
+	// Phase 2: finalize. Now commit + push.
+	if err := runGitHubBootstrapFinalize(context.Background(), io.Discard, state); err != nil {
+		t.Fatalf("finalize failed: %v", err)
+	}
+	if !r.hasCall(argsMatch("git", []string{"-c", "commit.gpgsign=false", "commit", "-m", "First"})) {
+		t.Fatal("expected commit during finalize")
+	}
+	if !r.hasCall(func(c fakeCall) bool {
+		return c.name == "gh" && len(c.args) >= 2 && c.args[0] == ghSubcmdRepo && c.args[1] == ghActCreate
+	}) {
+		t.Fatal("expected gh repo create during finalize")
+	}
+}
+
+// argsMatch returns a predicate for hasCall that matches when c.name == name
+// and c.args starts with the given args slice.
+func argsMatch(name string, args []string) func(fakeCall) bool {
+	return func(c fakeCall) bool {
+		if c.name != name || len(c.args) < len(args) {
+			return false
+		}
+		for i, a := range args {
+			if c.args[i] != a {
+				return false
+			}
+		}
+		return true
 	}
 }
 

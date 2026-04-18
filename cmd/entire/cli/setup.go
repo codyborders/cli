@@ -652,13 +652,20 @@ If Entire is already configured but disabled, this re-enables it.
 
 If the current directory is not a git repository, Entire can initialize one
 for you and (optionally) create a matching GitHub repository via the gh CLI.`,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 			ctx := cmd.Context()
 			// Check if we're in a git repository first. If not, offer to
 			// bootstrap one (git init + optional GitHub repo). If the user
 			// declines, fall back to the legacy prerequisite error.
+			//
+			// The bootstrap runs in two phases: phase 1 (git init + identity
+			// + gather GitHub choices) before agent setup, phase 2
+			// (initial commit + gh repo create + push) after agent setup so
+			// the initial commit captures the .entire/, .claude/, hooks, and
+			// settings files that setup writes.
+			var bootstrap *bootstrapState
 			if _, err := paths.WorktreeRoot(ctx); err != nil {
-				bootstrapErr := runGitHubBootstrap(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), bootstrapOpts)
+				state, bootstrapErr := runGitHubBootstrapInit(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), bootstrapOpts)
 				if errors.Is(bootstrapErr, errBootstrapDeclined) {
 					fmt.Fprintln(cmd.ErrOrStderr(), "Not a git repository. Please run 'entire enable' from within a git repository.")
 					return NewSilentError(errors.New("not a git repository"))
@@ -666,10 +673,23 @@ for you and (optionally) create a matching GitHub repository via the gh CLI.`,
 				if bootstrapErr != nil {
 					return bootstrapErr
 				}
+				bootstrap = state
 				// Re-check after bootstrap.
 				if _, err := paths.WorktreeRoot(ctx); err != nil {
 					return fmt.Errorf("bootstrap finished but no git repository detected: %w", err)
 				}
+				// On the way out (if setup succeeded), create the initial
+				// commit and push to the GitHub repo. If setup returned an
+				// error, skip the finalize — the user can fix the issue and
+				// re-run; any partial state is just untracked files.
+				defer func() {
+					if runErr != nil || bootstrap == nil {
+						return
+					}
+					if err := runGitHubBootstrapFinalize(ctx, cmd.OutOrStdout(), bootstrap); err != nil {
+						runErr = err
+					}
+				}()
 			}
 
 			if err := validateSetupFlags(opts.UseLocalSettings, opts.UseProjectSettings); err != nil {
