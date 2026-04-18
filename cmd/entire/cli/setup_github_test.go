@@ -93,6 +93,7 @@ func (f *fakeRunner) set(name string, args []string, stdout string, err error) {
 	f.responses[f.key(name, args)] = fakeResponse{stdout: stdout, err: err}
 }
 
+//nolint:unparam // err is always nil today; keep the parameter so tests can exercise interactive-call failures later without a signature change
 func (f *fakeRunner) setInteractive(name string, args []string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -427,8 +428,8 @@ func TestRunGitHubBootstrap_FullNonInteractive(t *testing.T) {
 		"--private",
 		"--source=.",
 		"--remote=origin",
-		"--push",
 	}, nil)
+	r.setInteractive("git", []string{"push", "--no-verify", "-u", "origin", "HEAD"}, nil)
 
 	opts := GitHubBootstrapOptions{
 		InitRepo:             true,
@@ -445,6 +446,11 @@ func TestRunGitHubBootstrap_FullNonInteractive(t *testing.T) {
 		return c.name == "gh" && len(c.args) > 3 && c.args[0] == ghSubcmdRepo && c.args[1] == ghActCreate
 	}) {
 		t.Fatal("expected gh repo create call")
+	}
+	// The initial push must bypass hooks so entire/checkpoints/v1 isn't
+	// pushed alongside the default branch.
+	if !r.hasCall(argsMatch("git", []string{"push", "--no-verify", "-u", "origin", "HEAD"})) {
+		t.Fatal("expected git push --no-verify after repo create")
 	}
 }
 
@@ -504,8 +510,8 @@ func TestRunGitHubBootstrap_InitBeforeFinalize(t *testing.T) {
 		"--private",
 		"--source=.",
 		"--remote=origin",
-		"--push",
 	}, nil)
+	r.setInteractive("git", []string{"push", "--no-verify", "-u", "origin", "HEAD"}, nil)
 
 	opts := GitHubBootstrapOptions{
 		InitRepo:             true,

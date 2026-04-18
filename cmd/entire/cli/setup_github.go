@@ -661,17 +661,24 @@ func ghRepoExists(ctx context.Context, runner bootstrapRunner, owner, name strin
 // ghRepoCreate creates a GitHub repo from the local source directory, adds
 // origin as its remote, and pushes if there's anything to push.
 func ghRepoCreate(ctx context.Context, runner bootstrapRunner, dir, fullName, visibility string, hasCommits bool) error {
+	// Create the remote repo and add origin, but don't push yet. We push
+	// separately below with --no-verify so the pre-push hook doesn't run
+	// on this first push: the entire/checkpoints/v1 branch has nothing to
+	// checkpoint (no sessions yet), and if it's pushed alongside the
+	// default branch GitHub can pick it as the default.
 	args := []string{
 		"repo", "create", fullName,
 		"--" + visibility,
 		"--source=.",
 		"--remote=origin",
 	}
-	if hasCommits {
-		args = append(args, "--push")
-	}
 	if err := runner.RunInteractive(ctx, dir, "gh", args...); err != nil {
 		return fmt.Errorf("gh repo create: %w", err)
+	}
+	if hasCommits {
+		if err := runner.RunInteractive(ctx, dir, "git", "push", "--no-verify", "-u", "origin", "HEAD"); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
 	}
 	return nil
 }
