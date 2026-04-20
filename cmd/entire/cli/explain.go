@@ -51,6 +51,15 @@ var generateTranscriptSummary = summarize.GenerateFromTranscript
 // to resolving the target as a git commit ref.
 var errCannotGenerateTemporaryCheckpoint = errors.New("cannot generate summary for temporary checkpoint")
 
+// generateOrRawLabel returns the user-facing verb for the action the user
+// requested, used in error messages when a commit target has no trailer.
+func generateOrRawLabel(generate bool) string {
+	if generate {
+		return "generate summary"
+	}
+	return "show raw transcript"
+}
+
 // interaction holds a single prompt and its responses for display.
 type interaction struct {
 	Prompt    string
@@ -287,6 +296,13 @@ func runExplainAuto(ctx context.Context, w, errW io.Writer, target string, noPag
 	}
 	cpID, hasCheckpoint := trailers.ParseCheckpoint(commit.Message)
 	if !hasCheckpoint {
+		// --generate/--raw-transcript explicitly ask for checkpoint work. If
+		// the resolved commit has no trailer there is nothing to generate
+		// against, so error instead of silently succeeding (which would leave
+		// scripts unable to distinguish "done" from "didn't happen").
+		if generate || rawTranscript {
+			return fmt.Errorf("cannot %s: commit %s has no Entire-Checkpoint trailer", generateOrRawLabel(generate), hash.String()[:7])
+		}
 		fmt.Fprintln(w, "No associated Entire checkpoint")
 		fmt.Fprintf(w, "\nCommit %s does not have an Entire-Checkpoint trailer.\n", hash.String()[:7])
 		fmt.Fprintln(w, "This commit was not created during an Entire session, or the trailer was removed.")
@@ -395,7 +411,7 @@ func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPr
 		if output != "" {
 			return errors.New(output)
 		}
-		return fmt.Errorf("checkpoint not found: %s: %w", checkpointIDPrefix, checkpoint.ErrCheckpointNotFound)
+		return fmt.Errorf("%w: %s", checkpoint.ErrCheckpointNotFound, checkpointIDPrefix)
 	case 1:
 		fullCheckpointID = matches[0]
 	default:
