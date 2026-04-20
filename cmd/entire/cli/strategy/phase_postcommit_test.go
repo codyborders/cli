@@ -1519,6 +1519,103 @@ func TestHandleTurnEnd_V2UsesExternalTranscriptCompactor(t *testing.T) {
 	require.Equal(t, fakeAgent.fullCompact, finalCompact)
 }
 
+func TestHandleTurnEnd_V2ExternalTranscriptCompactor_SkipsNonZeroCompactOffset(t *testing.T) {
+	dir := setupGitRepo(t)
+	t.Chdir(dir)
+
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".entire"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".entire", "settings.json"), []byte(testCheckpointsV2SettingsJSON), 0o644))
+
+	agentName := types.AgentName("test-external-turn-end-multi-compactor")
+	agentType := types.AgentType("Test External Turn End Multi Compactor")
+	fakeAgent := &fakeTranscriptCompactorAgent{
+		name:        agentName,
+		agentType:   agentType,
+		fullCompact: []byte("{\"v\":1,\"type\":\"assistant\",\"text\":\"checkpoint-1\"}\n"),
+		caps:        agent.DeclaredCaps{CompactTranscript: true},
+	}
+	agent.Register(agentName, func() agent.Agent { return fakeAgent })
+
+	s := &ManualCommitStrategy{}
+	sessionID := "test-turn-end-external-nonzero-offset"
+
+	setupSessionWithCheckpoint(t, s, repo, dir, sessionID)
+
+	state, err := s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.AgentType = agentType
+	state.Phase = session.PhaseActive
+	state.TranscriptPath = filepath.Join(dir, ".entire", "metadata", sessionID, paths.TranscriptFileName)
+	state.TurnCheckpointIDs = nil
+	require.NoError(t, s.saveSessionState(context.Background(), state))
+
+	cpID1 := "a1b2c3d4e5f6"
+	commitWithCheckpointTrailer(t, repo, dir, cpID1)
+	require.NoError(t, s.PostCommit(context.Background()))
+
+	fakeAgent.fullCompact = []byte("{\"v\":1,\"type\":\"assistant\",\"text\":\"checkpoint-2\"}\n")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "second.txt"), []byte("second file"), 0o644))
+	metadataDir := ".entire/metadata/" + sessionID
+	metadataDirAbs := filepath.Join(dir, metadataDir)
+	err = s.SaveStep(context.Background(), StepContext{
+		SessionID:      sessionID,
+		ModifiedFiles:  []string{"test.txt"},
+		NewFiles:       []string{"second.txt"},
+		MetadataDir:    metadataDir,
+		MetadataDirAbs: metadataDirAbs,
+		CommitMessage:  "Checkpoint 2",
+		AuthorName:     "Test",
+		AuthorEmail:    "test@test.com",
+	})
+	require.NoError(t, err)
+
+	state, err = s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	state.AgentType = agentType
+	state.Phase = session.PhaseActive
+	state.TranscriptPath = filepath.Join(dir, ".entire", "metadata", sessionID, paths.TranscriptFileName)
+	require.NoError(t, s.saveSessionState(context.Background(), state))
+
+	cpID2 := "b2c3d4e5f6a1"
+	commitFilesWithTrailer(t, repo, dir, cpID2, "second.txt")
+	require.NoError(t, s.PostCommit(context.Background()))
+
+	v2Store := checkpoint.NewV2GitStore(repo, ResolveCheckpointURL(context.Background(), "origin"))
+	initialCompact1, err := v2Store.ReadSessionCompactTranscript(context.Background(), id.MustCheckpointID(cpID1), 0)
+	require.NoError(t, err)
+	require.Equal(t, []byte("{\"v\":1,\"type\":\"assistant\",\"text\":\"checkpoint-1\"}\n"), initialCompact1)
+
+	initialCompact2, err := v2Store.ReadSessionCompactTranscript(context.Background(), id.MustCheckpointID(cpID2), 0)
+	require.NoError(t, err)
+	require.Equal(t, []byte("{\"v\":1,\"type\":\"assistant\",\"text\":\"checkpoint-2\"}\n"), initialCompact2)
+
+	updatedTranscript := `{"type":"human","message":{"content":"build something"}}
+{"type":"assistant","message":{"content":"done building"}}
+{"type":"human","message":{"content":"now finalize it"}}
+{"type":"assistant","message":{"content":"all done"}}
+`
+	require.NoError(t, os.WriteFile(state.TranscriptPath, []byte(updatedTranscript), 0o644))
+	fakeAgent.fullCompact = []byte("{\"v\":1,\"type\":\"assistant\",\"text\":\"final\"}\n")
+
+	state, err = s.loadSessionState(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Equal(t, []string{cpID1, cpID2}, state.TurnCheckpointIDs)
+
+	require.NoError(t, s.HandleTurnEnd(context.Background(), state))
+
+	finalCompact1, err := v2Store.ReadSessionCompactTranscript(context.Background(), id.MustCheckpointID(cpID1), 0)
+	require.NoError(t, err)
+	require.Equal(t, fakeAgent.fullCompact, finalCompact1)
+
+	finalCompact2, err := v2Store.ReadSessionCompactTranscript(context.Background(), id.MustCheckpointID(cpID2), 0)
+	require.NoError(t, err)
+	require.Equal(t, initialCompact2, finalCompact2)
+}
+
 // setupSessionWithCheckpoint initializes a session and creates one checkpoint
 // on the shadow branch so there is content available for condensation.
 // Also modifies test.txt to "agent modified content" and includes it in the checkpoint,
