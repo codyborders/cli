@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
+	"github.com/entireio/cli/cmd/entire/cli/agent/external"
 	"github.com/entireio/cli/cmd/entire/cli/agent/geminicli"
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
 	cpkg "github.com/entireio/cli/cmd/entire/cli/checkpoint"
@@ -57,6 +58,9 @@ Supported agents: claude-code, gemini, opencode, codex, cursor, copilot-cli, fac
 			if checkDisabledGuard(cmd.Context(), cmd.OutOrStdout()) {
 				return nil
 			}
+			// Discover external agents so --agent <external-name> is recognized
+			// and so auto-detection can find transcripts from external agents.
+			external.DiscoverAndRegister(cmd.Context())
 			agentName := types.AgentName(agentFlag)
 			return runAttach(cmd.Context(), cmd.OutOrStdout(), args[0], agentName, force)
 		},
