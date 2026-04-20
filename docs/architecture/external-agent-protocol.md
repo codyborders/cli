@@ -346,7 +346,11 @@ Builds a compact transcript representation for checkpoints v2.
 
 The `transcript` field is required and must contain base64-encoded `transcript.jsonl` bytes.
 
-Those bytes must be the compact **Entire Transcript Format** JSONL expected by checkpoints v2:
+Those bytes must be the complete cumulative compact **Entire Transcript Format** JSONL for the session up to the current point in time (not a delta/scoped slice since the previous checkpoint).
+
+The CLI writes these bytes byte-for-byte as the full `transcript.jsonl` file for the checkpoint, so external agents must always return the entire compact transcript accumulated so far.
+
+Those bytes must satisfy the checkpoints v2 format requirements:
 
 - UTF-8 JSONL, written byte-for-byte by the CLI to `transcript.jsonl`
 - Newline-terminated JSONL: each record must end with `\n`, including the final record
