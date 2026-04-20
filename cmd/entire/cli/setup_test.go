@@ -969,6 +969,8 @@ func TestEnableUsesSetupFlow(t *testing.T) {
 		{name: "checkpoint remote", args: []string{"--checkpoint-remote", "github:org/repo"}, want: true},
 		{name: "skip push sessions", args: []string{"--skip-push-sessions"}, want: true},
 		{name: "agent flag", args: []string{"--agent", "claude-code"}, agentName: "claude-code", want: true},
+		{name: "yes flag", args: []string{"--yes"}, want: true},
+		{name: "yes short flag", args: []string{"-y"}, want: true},
 	}
 
 	for _, tt := range tests {
@@ -2495,4 +2497,152 @@ func TestConfigureCmd_SummarizeModel_UsesExistingProvider(t *testing.T) {
 	if s.SummaryGeneration.Model != "sonnet" {
 		t.Fatalf("summary model = %q, want %q", s.SummaryGeneration.Model, "sonnet")
 	}
+}
+
+func TestSelectAllAgents_ReturnsAll(t *testing.T) {
+	t.Parallel()
+	available := []string{"claude-code", "gemini-cli", "opencode"}
+	selected, err := selectAllAgents(available)
+	if err != nil {
+		t.Fatalf("selectAllAgents() error = %v", err)
+	}
+	if !slices.Equal(selected, available) {
+		t.Errorf("selectAllAgents() = %v, want %v", selected, available)
+	}
+}
+
+func TestSelectAllAgents_EmptyReturnsError(t *testing.T) {
+	t.Parallel()
+	_, err := selectAllAgents(nil)
+	if err == nil {
+		t.Fatal("expected error for empty input")
+	}
+}
+
+func TestDetectOrSelectAgent_YesSelectsAll(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir and t.Setenv
+	setupTestRepo(t)
+	t.Setenv("ENTIRE_TEST_TTY", "1")
+
+	var buf bytes.Buffer
+	agents, err := detectOrSelectAgent(context.Background(), &buf, selectAllAgents)
+	if err != nil {
+		t.Fatalf("detectOrSelectAgent() with selectAllAgents error = %v", err)
+	}
+
+	// Should return at least 2 agents (claude-code + gemini-cli are registered in test imports)
+	if len(agents) < 2 {
+		t.Errorf("expected at least 2 agents with selectAllAgents, got %d", len(agents))
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Selected agents:") {
+		t.Errorf("Expected output to contain 'Selected agents:', got: %s", output)
+	}
+}
+
+func TestManageAgents_YesWorksNonInteractive(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Chdir and t.Setenv
+	setupTestRepo(t)
+	t.Setenv("ENTIRE_TEST_TTY", "0") // non-interactive
+
+	// Install claude-code hooks so there's something installed
+	writeClaudeHooksFixture(t)
+
+	// Use a selectFn that only picks built-in agents to avoid failures
+	// from stale external agent binaries registered by other tests.
+	selectBuiltIn := func(available []string) ([]string, error) {
+		var selected []string
+		for _, name := range available {
+			ag, err := agent.Get(types.AgentName(name))
+			if err != nil {
+				continue
+			}
+			if isBuiltInAgent(ag) {
+				selected = append(selected, name)
+			}
+		}
+		if len(selected) == 0 {
+			return nil, errors.New("no built-in agents available")
+		}
+		return selected, nil
+	}
+
+	var buf bytes.Buffer
+	err := runManageAgents(context.Background(), &buf, EnableOptions{}, selectBuiltIn)
+	if err != nil {
+		t.Fatalf("runManageAgents() with selectFn in non-interactive mode error = %v", err)
+	}
+
+	output := buf.String()
+	// Should NOT print the non-interactive bail-out message
+	if strings.Contains(output, "Cannot show agent selection in non-interactive mode") {
+		t.Error("selectFn should bypass the interactivity check, but got non-interactive message")
+	}
+}
+
+func TestEnableYes_TelemetryRespectsOptOut(t *testing.T) {
+	// Cannot use t.Parallel() because subtests use t.Setenv
+
+	t.Run("yes with telemetry=false", func(t *testing.T) {
+		s := &EntireSettings{}
+		opts := EnableOptions{Yes: true, Telemetry: false}
+		if !opts.Telemetry || os.Getenv("ENTIRE_TELEMETRY_OPTOUT") != "" {
+			f := false
+			s.Telemetry = &f
+		} else if s.Telemetry == nil {
+			tr := true
+			s.Telemetry = &tr
+		}
+		if s.Telemetry == nil || *s.Telemetry != false {
+			t.Errorf("expected telemetry=false when --yes --telemetry=false, got %v", s.Telemetry)
+		}
+	})
+
+	t.Run("yes with ENTIRE_TELEMETRY_OPTOUT", func(t *testing.T) {
+		t.Setenv("ENTIRE_TELEMETRY_OPTOUT", "1")
+		s := &EntireSettings{}
+		opts := EnableOptions{Yes: true, Telemetry: true}
+		if !opts.Telemetry || os.Getenv("ENTIRE_TELEMETRY_OPTOUT") != "" {
+			f := false
+			s.Telemetry = &f
+		} else if s.Telemetry == nil {
+			tr := true
+			s.Telemetry = &tr
+		}
+		if s.Telemetry == nil || *s.Telemetry != false {
+			t.Errorf("expected telemetry=false with ENTIRE_TELEMETRY_OPTOUT, got %v", s.Telemetry)
+		}
+	})
+
+	t.Run("yes defaults to telemetry enabled", func(t *testing.T) {
+		s := &EntireSettings{}
+		opts := EnableOptions{Yes: true, Telemetry: true}
+		if !opts.Telemetry {
+			f := false
+			s.Telemetry = &f
+		} else if s.Telemetry == nil {
+			tr := true
+			s.Telemetry = &tr
+		}
+		if s.Telemetry == nil || *s.Telemetry != true {
+			t.Errorf("expected telemetry=true with --yes (default), got %v", s.Telemetry)
+		}
+	})
+
+	t.Run("yes preserves existing telemetry setting", func(t *testing.T) {
+		existing := false
+		s := &EntireSettings{Telemetry: &existing}
+		opts := EnableOptions{Yes: true, Telemetry: true}
+		if !opts.Telemetry || os.Getenv("ENTIRE_TELEMETRY_OPTOUT") != "" {
+			f := false
+			s.Telemetry = &f
+		} else if s.Telemetry == nil {
+			tr := true
+			s.Telemetry = &tr
+		}
+		if *s.Telemetry != false {
+			t.Errorf("expected existing telemetry=false to be preserved, got %v", *s.Telemetry)
+		}
+	})
 }

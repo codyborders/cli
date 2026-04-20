@@ -56,6 +56,7 @@ type EnableOptions struct {
 	// when the caller is running the bootstrap flow, which takes over
 	// presentation of the final state (commit, push, done).
 	SuppressDoneMessage bool
+	Yes                 bool
 }
 
 // applyStrategyOptions sets strategy_options on settings from CLI flags.
@@ -102,14 +103,16 @@ func enableUsesSetupFlow(cmd *cobra.Command, agentName string) bool {
 	return cmd.Flags().Changed("force") ||
 		cmd.Flags().Changed("local-dev") ||
 		cmd.Flags().Changed("absolute-git-hook-path") ||
-		cmd.Flags().Changed("telemetry")
+		cmd.Flags().Changed("telemetry") ||
+		cmd.Flags().Changed("yes")
 }
 
 func enableNeedsAgentManagement(cmd *cobra.Command) bool {
 	return cmd.Flags().Changed("force") ||
 		cmd.Flags().Changed("local-dev") ||
 		cmd.Flags().Changed("absolute-git-hook-path") ||
-		cmd.Flags().Changed("telemetry")
+		cmd.Flags().Changed("telemetry") ||
+		cmd.Flags().Changed("yes")
 }
 
 // updateStrategyOptions applies strategy flags to settings without re-running agent setup.
@@ -275,12 +278,26 @@ func runSetupFlow(ctx context.Context, w io.Writer, opts EnableOptions) error {
 	// during setup the setting doesn't exist yet.
 	external.DiscoverAndRegisterAlways(ctx)
 
-	agents, err := detectOrSelectAgent(ctx, w, nil)
+	var selectFn func(available []string) ([]string, error)
+	if opts.Yes {
+		selectFn = selectAllAgents
+	}
+
+	agents, err := detectOrSelectAgent(ctx, w, selectFn)
 	if err != nil {
 		return fmt.Errorf("agent selection failed: %w", err)
 	}
 
 	return runEnableInteractive(ctx, w, agents, opts)
+}
+
+// selectAllAgents is a selectFn that selects all available agents.
+// Used by --yes to skip the interactive agent selection prompt.
+func selectAllAgents(available []string) ([]string, error) {
+	if len(available) == 0 {
+		return nil, errors.New("no agents available")
+	}
+	return available, nil
 }
 
 // runManageAgents shows which agents are currently enabled and lets the user
@@ -305,15 +322,15 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 		installedSet[name] = struct{}{}
 	}
 
-	// Check if we can prompt interactively
-	if !interactive.CanPromptInteractively() {
+	// When no selectFn is provided, check if we can prompt interactively.
+	// A selectFn (e.g. from --yes) bypasses the interactive prompt entirely.
+	if selectFn == nil && !interactive.CanPromptInteractively() {
 		fmt.Fprintln(w, "Cannot show agent selection in non-interactive mode.")
 		fmt.Fprintln(w, "Use: entire configure --agent <name>")
 		return nil
 	}
 
-	// Discover external agent plugins after the interactivity check to avoid
-	// scanning PATH (with a 10s timeout) in non-interactive contexts.
+	// Discover external agent plugins so they appear in agent selection.
 	// Use DiscoverAndRegisterAlways to bypass the external_agents setting —
 	// during setup the setting doesn't exist yet.
 	external.DiscoverAndRegisterAlways(ctx)
@@ -605,7 +622,11 @@ Use --remove to remove a specific agent non-interactively:
 
 			// If already set up, show agents and let user add more
 			if settings.IsSetUpAny(ctx) {
-				return runManageAgents(ctx, cmd.OutOrStdout(), opts, nil)
+				var selectFn func(available []string) ([]string, error)
+				if opts.Yes {
+					selectFn = selectAllAgents
+				}
+				return runManageAgents(ctx, cmd.OutOrStdout(), opts, selectFn)
 			}
 
 			// Fresh repo — run full setup flow
@@ -626,6 +647,7 @@ Use --remove to remove a specific agent non-interactively:
 	cmd.Flags().StringVar(&summarizeModel, flagSummarizeModel, "", "Set the model hint used by explain --generate")
 	cmd.Flags().BoolVar(&opts.Telemetry, "telemetry", true, "Enable anonymous usage analytics")
 	cmd.Flags().BoolVar(&opts.AbsoluteGitHookPath, "absolute-git-hook-path", false, "Embed full binary path in git hooks (for GUI git clients that don't source shell profiles)")
+	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Accept all defaults: enable all agents, accept telemetry, skip prompts")
 
 	// Provide a helpful error when --agent is used without a value
 	defaultFlagErr := cmd.FlagErrorFunc()
@@ -744,7 +766,11 @@ for you and (optionally) create a matching GitHub repository via the gh CLI.`,
 						}
 					}
 					if enableNeedsAgentManagement(cmd) {
-						if err := runManageAgents(ctx, cmd.OutOrStdout(), opts, nil); err != nil {
+						var selectFn func(available []string) ([]string, error)
+						if opts.Yes {
+							selectFn = selectAllAgents
+						}
+						if err := runManageAgents(ctx, cmd.OutOrStdout(), opts, selectFn); err != nil {
 							return err
 						}
 					}
@@ -779,6 +805,7 @@ for you and (optionally) create a matching GitHub repository via the gh CLI.`,
 	cmd.Flags().StringVar(&opts.CheckpointRemote, flagCheckpointRemote, "", "Checkpoint remote in provider:owner/repo format (e.g., github:org/checkpoints-repo)")
 	cmd.Flags().BoolVar(&opts.Telemetry, "telemetry", true, "Enable anonymous usage analytics")
 	cmd.Flags().BoolVar(&opts.AbsoluteGitHookPath, "absolute-git-hook-path", false, "Embed full binary path in git hooks (for GUI git clients that don't source shell profiles)")
+	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Accept all defaults: enable all agents, accept telemetry, skip prompts")
 
 	// Bootstrap flags for non-git-repo folders.
 	cmd.Flags().BoolVar(&bootstrapOpts.InitRepo, "init-repo", false, "If not a git repo, initialize one non-interactively")
@@ -928,12 +955,26 @@ func runEnableInteractive(ctx context.Context, w io.Writer, agents []agent.Agent
 	}
 	fmt.Fprintf(w, "✓ Project configured (%s)\n", configDisplay)
 
-	if _, err := maybePromptVercelDeploymentDisable(ctx, w, targetFile, nil); err != nil {
+	var vercelPromptFn func() (bool, error)
+	if opts.Yes {
+		vercelPromptFn = func() (bool, error) { return true, nil }
+	}
+	if _, err := maybePromptVercelDeploymentDisable(ctx, w, targetFile, vercelPromptFn); err != nil {
 		return err
 	}
 
-	// Ask about telemetry consent (only if not already asked)
-	if err := promptTelemetryConsent(settings, opts.Telemetry); err != nil {
+	// Ask about telemetry consent (only if not already asked).
+	// --yes skips the interactive prompt but still respects --telemetry=false
+	// and ENTIRE_TELEMETRY_OPTOUT — it only auto-answers the interactive question.
+	if opts.Yes {
+		if !opts.Telemetry || os.Getenv("ENTIRE_TELEMETRY_OPTOUT") != "" {
+			f := false
+			settings.Telemetry = &f
+		} else if settings.Telemetry == nil {
+			t := true
+			settings.Telemetry = &t
+		}
+	} else if err := promptTelemetryConsent(settings, opts.Telemetry); err != nil {
 		return fmt.Errorf("telemetry consent: %w", err)
 	}
 	// Save again to persist telemetry choice
