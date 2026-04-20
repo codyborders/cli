@@ -454,7 +454,27 @@ func resolveRepoName(ctx context.Context, w, errW io.Writer, runner bootstrapRun
 		return opts.RepoName, nil
 	}
 
-	if opts.Yes || !interactive.CanPromptInteractively() {
+	if opts.Yes {
+		// Check availability before blindly using the suggested name.
+		exists, checkErr := ghRepoExists(ctx, runner, owner, suggested)
+		if checkErr != nil {
+			// Check failed — proceed with the suggested name and let gh
+			// error later if the name is actually taken.
+			fmt.Fprintf(errW, "Warning: could not check if %s/%s already exists (%v).\n", owner, suggested, checkErr)
+			return suggested, nil
+		}
+		if !exists {
+			return suggested, nil
+		}
+		// Name taken. If a TTY is available, fall back to the interactive
+		// prompt so the user can pick a different name instead of failing.
+		if interactive.CanPromptInteractively() {
+			fmt.Fprintf(w, "%s/%s already exists on GitHub.\n", owner, suggested)
+		} else {
+			return "", fmt.Errorf("repository %s/%s already exists on GitHub (use --repo-name to specify a different name)", owner, suggested)
+		}
+	}
+	if !interactive.CanPromptInteractively() {
 		return suggested, nil
 	}
 

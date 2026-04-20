@@ -1088,6 +1088,35 @@ func TestRunGitHubBootstrap_YesAcceptsAllDefaults(t *testing.T) {
 	}
 }
 
+func TestRunGitHubBootstrap_YesRepoExistsNoTTY_Fails(t *testing.T) {
+	// When --yes is set, the repo name is taken, and there's no TTY,
+	// we should get a clear error instead of a silent gh failure.
+	t.Setenv("ENTIRE_TEST_TTY", "0")
+	dir := t.TempDir()
+	restoreCwd(t, dir)
+
+	r := newFakeRunner()
+	r.setIdentityConfigured()
+	r.set("gh", []string{"--version"}, "gh 2.81.0", nil)
+	r.set("gh", []string{"auth", "status"}, "Logged in", nil)
+	r.set("gh", []string{"api", "user", "--jq", ".login"}, "myuser\n", nil)
+	r.set("gh", []string{"api", "user/orgs", "--jq", ".[].login"}, "", nil)
+	r.set("git", []string{"init"}, "", nil)
+
+	// The suggested repo name already exists.
+	repoName := filepath.Base(dir)
+	r.set("gh", []string{"repo", "view", "myuser/" + repoName, "--json", "name"}, `{"name":"`+repoName+`"}`, nil)
+
+	opts := GitHubBootstrapOptions{Yes: true}
+	err := runGitHubBootstrapWith(context.Background(), io.Discard, io.Discard, opts, r)
+	if err == nil {
+		t.Fatal("expected error when repo name exists and no TTY")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' in error, got: %v", err)
+	}
+}
+
 func TestRunGitHubBootstrap_YesWithNoGitHub(t *testing.T) {
 	// --yes combined with --no-github should skip GitHub but still init + commit.
 	t.Setenv("ENTIRE_TEST_TTY", "0")
