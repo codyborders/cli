@@ -329,10 +329,7 @@ func TestConfigured_MalformedSettingsTreatedAsNotConfigured(t *testing.T) {
 	writeSettings(t, repoDir, `{`)
 	t.Chdir(repoDir)
 
-	configured, err := Configured(context.Background())
-	if err != nil {
-		t.Fatalf("Configured() error = %v", err)
-	}
+	configured := Configured(context.Background())
 	if configured {
 		t.Fatal("Configured() = true, want false")
 	}
@@ -352,7 +349,7 @@ func writeSettings(t *testing.T, repoDir, content string) {
 func TestRunGitHelperUsesGitCLI(t *testing.T) {
 	repoDir := t.TempDir()
 	testutil.InitRepo(t, repoDir)
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--git-dir")
 	cmd.Dir = repoDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git rev-parse failed: %v\nOutput: %s", err, output)
@@ -361,7 +358,7 @@ func TestRunGitHelperUsesGitCLI(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)

@@ -718,12 +718,7 @@ func checkRemoteMetadata(ctx context.Context, w, errW io.Writer, checkpointID id
 	}
 
 	// Resolve checkpoint remote URL once; reuse for both fetch and error message.
-	hasCheckpointRemote, configuredErr := remote.Configured(ctx)
-	if configuredErr != nil {
-		logging.Warn(logCtx, "checkpoint_remote configured but could not resolve URL",
-			slog.String("error", configuredErr.Error()),
-		)
-	}
+	hasCheckpointRemote := remote.Configured(ctx)
 
 	// Try checkpoint_remote first if configured and resolved (that's where checkpoints are stored)
 	var checkpointURL string
@@ -918,7 +913,7 @@ func resumeSingleSession(ctx context.Context, w, errW io.Writer, ag agent.Agent,
 				logging.Debug(ctx, "resume: using origin for v2 session log fetch remote",
 					slog.String("error", fetchRemoteErr.Error()),
 				)
-				v2URL = "origin"
+				v2URL = ""
 			}
 			v2Store := checkpoint.NewV2GitStore(repo, v2URL)
 			var v2Err error

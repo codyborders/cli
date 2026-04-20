@@ -220,6 +220,8 @@ func runExplain(ctx context.Context, w, errW io.Writer, sessionID, commitRef, ch
 // When force is true, regenerates even if a summary already exists.
 // When rawTranscript is true, outputs only the raw transcript file (JSONL format).
 // When searchAll is true, searches all commits without branch/depth limits (used for finding associated commits).
+//
+//nolint:maintidx // Command handler intentionally coordinates multiple checkpoint lookup/fetch paths.
 func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPrefix string, noPager, verbose, full, rawTranscript, generate, force, searchAll bool) error {
 	repo, err := openRepository(ctx)
 	if err != nil {
@@ -232,7 +234,7 @@ func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPr
 		logging.Debug(ctx, "explain: using origin for v2 store fetch remote",
 			slog.String("error", err.Error()),
 		)
-		v2URL = "origin"
+		v2URL = ""
 	}
 	v2Store := checkpoint.NewV2GitStore(repo, v2URL)
 	preferCheckpointsV2 := settings.IsCheckpointsV2Enabled(ctx)
@@ -277,7 +279,7 @@ func runExplainCheckpoint(ctx context.Context, w, errW io.Writer, checkpointIDPr
 					logging.Debug(ctx, "explain: using origin for refreshed v2 store fetch remote",
 						slog.String("error", err.Error()),
 					)
-					v2URL = "origin"
+					v2URL = ""
 				}
 				v2Store = checkpoint.NewV2GitStore(repo, v2URL)
 				if freshCommitted, listErr := listCommittedForExplain(ctx, v1Store, v2Store, preferCheckpointsV2); listErr == nil {
@@ -1289,7 +1291,7 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 		logging.Debug(ctx, "explain: using origin for branch checkpoint v2 store fetch remote",
 			slog.String("error", err.Error()),
 		)
-		v2URL = "origin"
+		v2URL = ""
 	}
 	v2Store := checkpoint.NewV2GitStore(repo, v2URL)
 	preferCheckpointsV2 := settings.IsCheckpointsV2Enabled(ctx)

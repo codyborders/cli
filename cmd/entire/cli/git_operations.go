@@ -508,10 +508,7 @@ func fetchV2MainFromOrigin(ctx context.Context, shallow bool) error {
 // configured checkpoint_remote URL.
 // Returns an error if the fetch fails or no checkpoint_remote is configured.
 func FetchV2MetadataFromCheckpointRemote(ctx context.Context) error {
-	configured, configuredErr := remote.Configured(ctx)
-	if configuredErr != nil {
-		return fmt.Errorf("failed to load checkpoint remote configuration: %w", configuredErr)
-	}
+	configured := remote.Configured(ctx)
 	if !configured {
 		return errors.New("no checkpoint_remote configured")
 	}
@@ -530,10 +527,7 @@ func FetchV2MetadataFromCheckpointRemote(ctx context.Context) error {
 // configured checkpoint_remote URL and updates the local branch.
 // Returns an error if the fetch fails or no checkpoint_remote is configured.
 func FetchMetadataFromCheckpointRemote(ctx context.Context) error {
-	configured, configuredErr := remote.Configured(ctx)
-	if configuredErr != nil {
-		return fmt.Errorf("failed to load checkpoint remote configuration: %w", configuredErr)
-	}
+	configured := remote.Configured(ctx)
 	if !configured {
 		return errors.New("no checkpoint_remote configured")
 	}

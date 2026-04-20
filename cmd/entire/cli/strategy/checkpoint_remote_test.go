@@ -24,33 +24,33 @@ func TestParseGitRemoteURL(t *testing.T) {
 	tests := []struct {
 		name     string
 		url      string
-		wantInfo *remote.RemoteInfo
+		wantInfo *remote.Info
 		wantErr  bool
 	}{
 		{
 			name:     "SSH SCP format",
 			url:      "git@github.com:org/repo.git",
-			wantInfo: &remote.RemoteInfo{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
+			wantInfo: &remote.Info{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
 		},
 		{
 			name:     "SSH SCP without .git",
 			url:      "git@github.com:org/repo",
-			wantInfo: &remote.RemoteInfo{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
+			wantInfo: &remote.Info{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
 		},
 		{
 			name:     "HTTPS format",
 			url:      "https://github.com/org/repo.git",
-			wantInfo: &remote.RemoteInfo{Protocol: remote.ProtocolHTTPS, Host: "github.com", Owner: "org", Repo: "repo"},
+			wantInfo: &remote.Info{Protocol: remote.ProtocolHTTPS, Host: "github.com", Owner: "org", Repo: "repo"},
 		},
 		{
 			name:     "HTTPS without .git",
 			url:      "https://github.com/org/repo",
-			wantInfo: &remote.RemoteInfo{Protocol: remote.ProtocolHTTPS, Host: "github.com", Owner: "org", Repo: "repo"},
+			wantInfo: &remote.Info{Protocol: remote.ProtocolHTTPS, Host: "github.com", Owner: "org", Repo: "repo"},
 		},
 		{
 			name:     "SSH protocol format",
 			url:      "ssh://git@github.com/org/repo.git",
-			wantInfo: &remote.RemoteInfo{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
+			wantInfo: &remote.Info{Protocol: remote.ProtocolSSH, Host: "github.com", Owner: "org", Repo: "repo"},
 		},
 		{
 			name:    "empty string",
@@ -582,8 +582,7 @@ func TestFetchURL_ReturnsCheckpointRemoteURL(t *testing.T) {
 
 	t.Chdir(localDir)
 
-	configured, err := remote.Configured(ctx)
-	require.NoError(t, err)
+	configured := remote.Configured(ctx)
 	assert.True(t, configured)
 
 	url, err := remote.FetchURL(ctx)
@@ -609,8 +608,7 @@ func TestConfigured_NoCheckpointRemote(t *testing.T) {
 
 	t.Chdir(localDir)
 
-	configured, err := remote.Configured(t.Context())
-	require.NoError(t, err)
+	configured := remote.Configured(t.Context())
 	assert.False(t, configured)
 }
 
@@ -644,8 +642,7 @@ func TestFetchURL_IgnoresOwnerMismatchCheck(t *testing.T) {
 
 	t.Chdir(localDir)
 
-	configured, err := remote.Configured(ctx)
-	require.NoError(t, err)
+	configured := remote.Configured(ctx)
 	assert.True(t, configured)
 
 	// resolvePushSettings would reject this owner mismatch, but FetchURL

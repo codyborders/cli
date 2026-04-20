@@ -140,7 +140,11 @@ func ResolveFetchTarget(ctx context.Context, target string) (string, error) {
 	if isURL(target) || !settings.IsFilteredFetchesEnabled(ctx) {
 		return target, nil
 	}
-	return remote.GetRemoteURL(ctx, target)
+	url, err := remote.GetRemoteURL(ctx, target)
+	if err != nil {
+		return "", fmt.Errorf("get remote URL: %w", err)
+	}
+	return url, nil
 }
 
 // AppendFetchFilterArgs appends the partial-clone filter arguments when the

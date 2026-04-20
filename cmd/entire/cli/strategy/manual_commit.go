@@ -86,7 +86,6 @@ func (s *ManualCommitStrategy) getV2CheckpointStore(ctx context.Context) (*check
 			logging.Debug(ctx, "manual-commit: using origin for v2 store fetch remote",
 				"error", err.Error(),
 			)
-			v2URL = "origin"
 		}
 		s.v2CheckpointStore = checkpoint.NewV2GitStore(repo, v2URL)
 	})

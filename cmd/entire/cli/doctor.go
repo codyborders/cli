@@ -427,11 +427,8 @@ func checkDisconnectedV2Main(cmd *cobra.Command, force bool) error {
 	}
 
 	ctx := cmd.Context()
-	configured, configuredErr := remote.Configured(ctx)
-	if configuredErr != nil {
-		return fmt.Errorf("failed to load checkpoint remote configuration: %w", configuredErr)
-	}
-	remoteName := "origin"
+	configured := remote.Configured(ctx)
+	remoteName := migrateRemoteName
 	if configured {
 		resolvedRemote, resolveErr := remote.FetchURL(ctx)
 		if resolveErr != nil {

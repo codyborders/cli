@@ -23,7 +23,7 @@ const (
 	ProtocolHTTPS = "https"
 )
 
-type RemoteInfo struct {
+type Info struct {
 	Protocol string
 	Host     string
 	Owner    string
@@ -71,7 +71,7 @@ func FetchURL(ctx context.Context) (string, error) {
 	if withToken {
 		host, ok := providerHost(config.Provider)
 		if ok {
-			checkpointURL, err := deriveCheckpointURLFromInfo(&RemoteInfo{
+			checkpointURL, err := deriveCheckpointURLFromInfo(&Info{
 				Protocol: ProtocolHTTPS,
 				Host:     host,
 			}, config)
@@ -119,7 +119,10 @@ func FetchURL(ctx context.Context) (string, error) {
 // configured and should be used for push. When false, the returned URL is the
 // repository's origin URL as a fallback.
 func PushURL(ctx context.Context, pushRemoteName string) (string, bool, error) {
-	originURL, _ := GetRemoteURL(ctx, originRemote)
+	originURL := ""
+	if resolvedOriginURL, err := GetRemoteURL(ctx, originRemote); err == nil {
+		originURL = resolvedOriginURL
+	}
 
 	s, err := settings.Load(ctx)
 	if err != nil {
@@ -165,7 +168,7 @@ func PushURL(ctx context.Context, pushRemoteName string) (string, bool, error) {
 		return "", true, fmt.Errorf("no push URL found: %w", err)
 	}
 	if strings.TrimSpace(os.Getenv(checkpointTokenEnvVar)) != "" {
-		pushInfo = &RemoteInfo{
+		pushInfo = &Info{
 			Protocol: ProtocolHTTPS,
 			Host:     pushInfo.Host,
 			Owner:    pushInfo.Owner,
@@ -198,15 +201,15 @@ func PushURL(ctx context.Context, pushRemoteName string) (string, bool, error) {
 }
 
 // Configured reports whether a structured checkpoint_remote is configured.
-func Configured(ctx context.Context) (bool, error) {
+func Configured(ctx context.Context) bool {
 	s, err := settings.Load(ctx)
 	if err != nil {
 		logging.Warn(ctx, "checkpoint remote configuration unavailable; treating as not configured",
 			slog.String("error", err.Error()),
 		)
-		return false, nil
+		return false
 	}
-	return s.GetCheckpointRemote() != nil, nil
+	return s.GetCheckpointRemote() != nil
 }
 
 func GetRemoteURL(ctx context.Context, remoteName string) (string, error) {
@@ -218,7 +221,7 @@ func GetRemoteURL(ctx context.Context, remoteName string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func ParseURL(rawURL string) (*RemoteInfo, error) {
+func ParseURL(rawURL string) (*Info, error) {
 	rawURL = strings.TrimSpace(rawURL)
 
 	if strings.Contains(rawURL, ":") && !strings.Contains(rawURL, "://") {
@@ -239,7 +242,7 @@ func ParseURL(rawURL string) (*RemoteInfo, error) {
 			return nil, err
 		}
 
-		return &RemoteInfo{Protocol: ProtocolSSH, Host: host, Owner: owner, Repo: repo}, nil
+		return &Info{Protocol: ProtocolSSH, Host: host, Owner: owner, Repo: repo}, nil
 	}
 
 	u, err := url.Parse(rawURL)
@@ -256,7 +259,7 @@ func ParseURL(rawURL string) (*RemoteInfo, error) {
 		return nil, err
 	}
 
-	return &RemoteInfo{Protocol: u.Scheme, Host: u.Hostname(), Owner: owner, Repo: repo}, nil
+	return &Info{Protocol: u.Scheme, Host: u.Hostname(), Owner: owner, Repo: repo}, nil
 }
 
 func DeriveCheckpointURL(pushRemoteURL string, config *settings.CheckpointRemoteConfig) (string, error) {
@@ -275,7 +278,7 @@ func ExtractOwnerFromRemoteURL(rawURL string) string {
 	return info.Owner
 }
 
-func deriveCheckpointURLFromInfo(info *RemoteInfo, config *settings.CheckpointRemoteConfig) (string, error) {
+func deriveCheckpointURLFromInfo(info *Info, config *settings.CheckpointRemoteConfig) (string, error) {
 	switch info.Protocol {
 	case ProtocolSSH:
 		return fmt.Sprintf("git@%s:%s.git", info.Host, config.Repo), nil

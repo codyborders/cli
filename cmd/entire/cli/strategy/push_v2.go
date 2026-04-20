@@ -417,7 +417,6 @@ func pushV2Refs(ctx context.Context, target string) {
 		logging.Debug(ctx, "push-v2: using origin for archived generation fetch remote",
 			slog.String("error", err.Error()),
 		)
-		v2URL = "origin"
 	}
 	store := checkpoint.NewV2GitStore(repo, v2URL)
 	archived, err := store.ListArchivedGenerations()

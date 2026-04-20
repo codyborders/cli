@@ -222,7 +222,6 @@ func writeAttachCheckpointV2(ctx context.Context, repo *git.Repository, opts cpk
 		logging.Debug(ctx, "attach: using origin for v2 store fetch remote",
 			slog.String("error", err.Error()),
 		)
-		v2URL = "origin"
 	}
 	v2Store := cpkg.NewV2GitStore(repo, v2URL)
 	if err := v2Store.WriteCommitted(ctx, opts); err != nil {
