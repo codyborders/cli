@@ -478,12 +478,15 @@ func compactTranscriptForExternalAgent(
 		)
 		return nil
 	}
-	if len(compacted.Transcript) == 0 {
+	if len(bytes.TrimSpace(compacted.Transcript)) == 0 {
 		logging.Warn(ctx, "external transcript compaction returned empty transcript",
 			slog.String("session_id", sessionID),
 			slog.String("agent", string(compactor.Name())),
 		)
 		return nil
+	}
+	if !bytes.HasSuffix(compacted.Transcript, []byte{'\n'}) {
+		compacted.Transcript = append(compacted.Transcript, '\n')
 	}
 	if len(compacted.Assets) > 0 {
 		logging.Warn(ctx, "external transcript compaction returned assets that are not yet persisted",

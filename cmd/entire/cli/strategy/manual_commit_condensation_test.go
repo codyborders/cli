@@ -178,6 +178,35 @@ func TestBuildCompactTranscript_ExternalCompactorNilResultDoesNotPanic(t *testin
 	require.Nil(t, writeOpts.CompactTranscript)
 }
 
+func TestCompactTranscriptForExternalAgent_RejectsWhitespaceOnlyOutput(t *testing.T) {
+	t.Parallel()
+
+	ag := &fakeTranscriptCompactorAgent{
+		name:        types.AgentName("test-external-whitespace"),
+		agentType:   types.AgentType("Test External Whitespace"),
+		fullCompact: []byte(" \n\t "),
+		caps:        agent.DeclaredCaps{CompactTranscript: true},
+	}
+
+	compacted := compactTranscriptForExternalAgent(context.Background(), ag, "sess-1", "/tmp/session.jsonl")
+	require.Nil(t, compacted)
+}
+
+func TestCompactTranscriptForExternalAgent_AppendsTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	ag := &fakeTranscriptCompactorAgent{
+		name:        types.AgentName("test-external-newline"),
+		agentType:   types.AgentType("Test External Newline"),
+		fullCompact: []byte("{\"v\":1,\"type\":\"assistant\"}"),
+		caps:        agent.DeclaredCaps{CompactTranscript: true},
+	}
+
+	compacted := compactTranscriptForExternalAgent(context.Background(), ag, "sess-1", "/tmp/session.jsonl")
+	require.NotNil(t, compacted)
+	require.Equal(t, []byte("{\"v\":1,\"type\":\"assistant\"}\n"), compacted.Transcript)
+}
+
 func TestCalculateTokenUsage_EmptyData(t *testing.T) {
 	t.Parallel()
 
