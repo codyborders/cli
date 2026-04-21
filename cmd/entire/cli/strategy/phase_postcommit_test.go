@@ -1495,7 +1495,7 @@ func TestHandleTurnEnd_V2UsesExternalTranscriptCompactor(t *testing.T) {
 	require.NoError(t, s.PostCommit(context.Background()))
 
 	cpID := testTrailerCheckpointID
-	v2Store := checkpoint.NewV2GitStore(repo, ResolveCheckpointURL(context.Background(), "origin"))
+	v2Store := checkpoint.NewV2GitStore(repo, "origin")
 	initialCompact, err := v2Store.ReadSessionCompactTranscript(context.Background(), cpID, 0)
 	require.NoError(t, err)
 	require.Equal(t, fakeAgent.fullCompact, initialCompact)
@@ -1584,7 +1584,7 @@ func TestHandleTurnEnd_V2ExternalTranscriptCompactor_UpdatesAllTurnCheckpoints(t
 	commitFilesWithTrailer(t, repo, dir, cpID2, "second.txt")
 	require.NoError(t, s.PostCommit(context.Background()))
 
-	v2Store := checkpoint.NewV2GitStore(repo, ResolveCheckpointURL(context.Background(), "origin"))
+	v2Store := checkpoint.NewV2GitStore(repo, "origin")
 	initialCompact1, err := v2Store.ReadSessionCompactTranscript(context.Background(), id.MustCheckpointID(cpID1), 0)
 	require.NoError(t, err)
 	require.JSONEq(t, "{\"v\":1,\"type\":\"assistant\",\"text\":\"checkpoint-1\"}\n", string(initialCompact1))
