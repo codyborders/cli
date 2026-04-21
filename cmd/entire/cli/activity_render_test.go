@@ -76,7 +76,7 @@ func TestUniqueCommitAgents_Empty(t *testing.T) {
 func TestRenderStatCards_ContainsAllLabels(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	sty := statsStyles{width: 80}
+	sty := activityStyles{width: 80}
 	stats := contributionStats{
 		Throughput:    23.2,
 		Iteration:     1.4,
@@ -104,7 +104,7 @@ func TestRenderStatCards_IterationLabelSaysSession(t *testing.T) {
 	t.Parallel()
 	// Use wide terminal so descriptions aren't truncated
 	var buf bytes.Buffer
-	sty := statsStyles{width: 120}
+	sty := activityStyles{width: 120}
 	renderStatCards(&buf, sty, contributionStats{})
 	out := buf.String()
 
@@ -119,7 +119,7 @@ func TestRenderStatCards_IterationLabelSaysSession(t *testing.T) {
 func TestRenderCommitList_NilCommitMessage(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	sty := statsStyles{width: 80}
+	sty := activityStyles{width: 80}
 	days := []commitDay{
 		{Date: "2026-01-15", Commits: []userCommit{
 			{CommitSHA: "abc1234567", CommitMsg: nil, RepoFullName: "org/repo"},
@@ -139,7 +139,7 @@ func TestRenderCommitList_SingularPlural(t *testing.T) {
 	t.Run("1 file 1 checkpoint", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		sty := statsStyles{width: 80}
+		sty := activityStyles{width: 80}
 		days := []commitDay{
 			{Date: "2026-01-15", Commits: []userCommit{
 				{
@@ -171,7 +171,7 @@ func TestRenderCommitList_SingularPlural(t *testing.T) {
 	t.Run("multiple files and checkpoints", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
-		sty := statsStyles{width: 80}
+		sty := activityStyles{width: 80}
 		days := []commitDay{
 			{Date: "2026-01-15", Commits: []userCommit{
 				{
@@ -207,7 +207,7 @@ func TestRenderCommitList_SingularPlural(t *testing.T) {
 func TestRenderContributionChart_Empty(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	sty := statsStyles{width: 80}
+	sty := activityStyles{width: 80}
 	renderContributionChart(&buf, sty, nil, nil)
 	out := buf.String()
 	if !strings.Contains(out, "CONTRIBUTIONS") {
@@ -221,7 +221,7 @@ func TestRenderContributionChart_Empty(t *testing.T) {
 func TestRenderContributionChart_MonthAxisWideWidth(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	sty := statsStyles{width: 200}
+	sty := activityStyles{width: 200}
 	hourly := []hourlyPoint{
 		{Date: "2026-04-01", Hour: 12, Value: 3, AgentID: "claude"},
 	}
@@ -254,7 +254,7 @@ func TestRenderRepoChart_LimitsToFive(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	sty := statsStyles{width: 80}
+	sty := activityStyles{width: 80}
 	renderRepoChart(&buf, sty, repos)
 	out := buf.String()
 
@@ -300,7 +300,7 @@ func TestPadOrTruncate(t *testing.T) {
 func TestRenderCommitList_UnicodeMessageSafeTruncation(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	sty := statsStyles{width: 40}
+	sty := activityStyles{width: 40}
 	msg := "fix café 🔥 renderer alignment"
 	days := []commitDay{
 		{Date: "2026-01-15", Commits: []userCommit{
@@ -323,7 +323,7 @@ func TestRenderCommitList_UnicodeMessageSafeTruncation(t *testing.T) {
 
 func TestNewStatsStylesWithWidth_RespectsColorFlag(t *testing.T) {
 	t.Parallel()
-	sty := newStatsStylesWithWidth(80, false)
+	sty := newActivityStylesWithWidth(80, false)
 	if sty.colorEnabled {
 		t.Fatal("expected colorEnabled=false")
 	}
@@ -332,12 +332,12 @@ func TestNewStatsStylesWithWidth_RespectsColorFlag(t *testing.T) {
 func TestRunStatsTUI_NoColorStyleFlag(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
-	m := statsModel{
+	m := activityModel{
 		useColor: shouldUseColor(os.Stdout),
 	}
 	m.width = 80
 	m = m.withViewport()
-	m.sty = newStatsStylesWithWidth(m.width, m.useColor)
+	m.sty = newActivityStylesWithWidth(m.width, m.useColor)
 
 	if m.useColor {
 		t.Fatal("expected NO_COLOR to disable stats TUI colors")

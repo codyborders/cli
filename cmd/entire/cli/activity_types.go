@@ -1,6 +1,6 @@
 package cli
 
-// API response types for the /api/v1/stats/* endpoints used by `entire stats`.
+// API response types for the /api/v1/stats/* endpoints used by `entire activity`.
 
 // userCheckpoint represents a single checkpoint returned by the checkpoints API.
 type userCheckpoint struct {

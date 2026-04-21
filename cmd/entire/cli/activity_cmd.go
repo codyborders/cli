@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	agentUnknown   = "unknown"
-	dateUnknown    = "unknown"
-	statsTimeframe = "last-month"
-	statsLimit     = 1000
+	agentUnknown      = "unknown"
+	dateUnknown       = "unknown"
+	activityTimeframe = "last-month"
+	activityLimit     = 1000
 )
 
 // knownAgents maps normalized agent strings from the API to display IDs.
@@ -39,19 +39,19 @@ var knownAgents = map[string]string{
 	"kiro":       "kiro",
 }
 
-func newStatsCmd() *cobra.Command {
+func newActivityCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "stats",
+		Use:   "activity",
 		Short: "Show your activity overview",
-		Long:  "Display checkpoint stats, repository breakdown, and recent commits from entire.io",
+		Long:  "Display your activity overview, repository breakdown, and recent commits from entire.io",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runStats(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runActivity(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	return cmd
 }
 
-func runStats(ctx context.Context, w, errW io.Writer) error {
+func runActivity(ctx context.Context, w, errW io.Writer) error {
 	client, err := NewAuthenticatedAPIClient(false)
 	if err != nil {
 		fmt.Fprintln(errW, "Not logged in. Run 'entire login' to authenticate.")
@@ -60,13 +60,13 @@ func runStats(ctx context.Context, w, errW io.Writer) error {
 
 	// Non-interactive fallback: piped output or accessibility mode
 	if !isTerminalWriter(w) || IsAccessibleMode() {
-		return runStatsStatic(ctx, w, client)
+		return runActivityStatic(ctx, w, client)
 	}
 
-	return runStatsTUI(ctx, client)
+	return runActivityTUI(ctx, client)
 }
 
-func runStatsStatic(ctx context.Context, w io.Writer, client *api.Client) error {
+func runActivityStatic(ctx context.Context, w io.Writer, client *api.Client) error {
 	var checkpoints []userCheckpoint
 	var streakDates []string
 	var commits []userCommit
@@ -83,7 +83,7 @@ func runStatsStatic(ctx context.Context, w io.Writer, client *api.Client) error 
 		return fetchErr
 	})
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("fetch stats: %w", err)
+		return fmt.Errorf("fetch activity: %w", err)
 	}
 
 	stats := computeContributionStats(checkpoints, streakDates)
@@ -91,13 +91,13 @@ func runStatsStatic(ctx context.Context, w io.Writer, client *api.Client) error 
 	hourly := computeHourlyData(checkpoints)
 	days := groupCommitsByDay(commits)
 
-	sty := newStatsStyles(w)
-	renderStats(w, sty, stats, repos, hourly, days)
+	sty := newActivityStyles(w)
+	renderActivity(w, sty, stats, repos, hourly, days)
 	return nil
 }
 
 func fetchCheckpoints(ctx context.Context, client *api.Client) ([]userCheckpoint, []string, error) {
-	path := fmt.Sprintf("/api/v1/stats/checkpoints?timeframe=%s&limit=%d", statsTimeframe, statsLimit)
+	path := fmt.Sprintf("/api/v1/stats/checkpoints?timeframe=%s&limit=%d", activityTimeframe, activityLimit)
 	resp, err := client.Get(ctx, path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GET checkpoints: %w", err)
@@ -116,7 +116,7 @@ func fetchCheckpoints(ctx context.Context, client *api.Client) ([]userCheckpoint
 }
 
 func fetchCommits(ctx context.Context, client *api.Client) ([]userCommit, error) {
-	path := fmt.Sprintf("/api/v1/stats/commits?timeframe=%s&limit=%d", statsTimeframe, statsLimit)
+	path := fmt.Sprintf("/api/v1/stats/commits?timeframe=%s&limit=%d", activityTimeframe, activityLimit)
 	resp, err := client.Get(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("GET commits: %w", err)

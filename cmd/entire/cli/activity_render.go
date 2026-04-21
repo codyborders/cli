@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-type statsStyles struct {
+type activityStyles struct {
 	colorEnabled bool
 	width        int
 
@@ -33,7 +33,7 @@ type statsStyles struct {
 }
 
 // getFullTerminalWidth returns the terminal width without the 80-char cap
-// used by other commands. Stats benefits from wide output for bar charts.
+// used by other commands. Activity benefits from wide output for bar charts.
 func getFullTerminalWidth(w io.Writer) int {
 	if f, ok := w.(*os.File); ok {
 		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 { //nolint:gosec // G115: uintptr->int is safe for fd
@@ -51,11 +51,11 @@ func getFullTerminalWidth(w io.Writer) int {
 	return 80
 }
 
-func newStatsStyles(w io.Writer) statsStyles {
+func newActivityStyles(w io.Writer) activityStyles {
 	useColor := shouldUseColor(w)
 	width := getFullTerminalWidth(w)
 
-	s := statsStyles{
+	s := activityStyles{
 		colorEnabled: useColor,
 		width:        width,
 	}
@@ -78,14 +78,14 @@ func newStatsStyles(w io.Writer) statsStyles {
 	return s
 }
 
-func (s statsStyles) render(style lipgloss.Style, text string) string {
+func (s activityStyles) render(style lipgloss.Style, text string) string {
 	if !s.colorEnabled {
 		return text
 	}
 	return style.Render(text)
 }
 
-func (s statsStyles) renderAgent(agentID, text string) string {
+func (s activityStyles) renderAgent(agentID, text string) string {
 	if !s.colorEnabled {
 		return text
 	}
@@ -120,7 +120,7 @@ var agentOrder = []string{
 	"copilot", "pi", "cursor", "droid", "kiro", "unknown",
 }
 
-func renderStats(w io.Writer, sty statsStyles, stats contributionStats, repos []repoContribution, hourly []hourlyPoint, days []commitDay) {
+func renderActivity(w io.Writer, sty activityStyles, stats contributionStats, repos []repoContribution, hourly []hourlyPoint, days []commitDay) {
 	fmt.Fprintln(w)
 	renderStatCards(w, sty, stats)
 	fmt.Fprintln(w)
@@ -131,7 +131,7 @@ func renderStats(w io.Writer, sty statsStyles, stats contributionStats, repos []
 	renderCommitList(w, sty, days)
 }
 
-func renderStatCards(w io.Writer, sty statsStyles, stats contributionStats) {
+func renderStatCards(w io.Writer, sty activityStyles, stats contributionStats) {
 	cards := []struct {
 		label string
 		value string
@@ -166,11 +166,11 @@ func renderStatCards(w io.Writer, sty statsStyles, stats contributionStats) {
 	fmt.Fprintln(w, strings.Join(botParts, sep))
 }
 
-func renderContributionChart(w io.Writer, sty statsStyles, hourly []hourlyPoint, repos []repoContribution) {
+func renderContributionChart(w io.Writer, sty activityStyles, hourly []hourlyPoint, repos []repoContribution) {
 	renderDotChart(w, sty, hourly, repos)
 }
 
-func renderDotChart(w io.Writer, sty statsStyles, hourly []hourlyPoint, repos []repoContribution) {
+func renderDotChart(w io.Writer, sty activityStyles, hourly []hourlyPoint, repos []repoContribution) {
 	agentTotals := make(map[string]int)
 	total := 0
 	for _, r := range repos {
@@ -325,7 +325,7 @@ func renderDotChart(w io.Writer, sty statsStyles, hourly []hourlyPoint, repos []
 // renderContributionChart to enable it.
 var _ = renderBrailleChart // keep compiled while inactive
 
-func renderBrailleChart(w io.Writer, sty statsStyles, hourly []hourlyPoint, repos []repoContribution) {
+func renderBrailleChart(w io.Writer, sty activityStyles, hourly []hourlyPoint, repos []repoContribution) {
 	// Agent breakdown header + total
 	agentTotals := make(map[string]int)
 	total := 0
@@ -495,7 +495,7 @@ func renderBrailleChart(w io.Writer, sty statsStyles, hourly []hourlyPoint, repo
 	}
 }
 
-func renderRepoChart(w io.Writer, sty statsStyles, repos []repoContribution) {
+func renderRepoChart(w io.Writer, sty activityStyles, repos []repoContribution) {
 	if len(repos) == 0 {
 		return
 	}
@@ -543,7 +543,7 @@ func renderRepoChart(w io.Writer, sty statsStyles, repos []repoContribution) {
 	}
 }
 
-func renderAgentBar(sty statsStyles, agents map[string]int, maxCount, barWidth int) string {
+func renderAgentBar(sty activityStyles, agents map[string]int, maxCount, barWidth int) string {
 	if maxCount == 0 {
 		return strings.Repeat(" ", barWidth)
 	}
@@ -580,11 +580,11 @@ func renderAgentBar(sty statsStyles, agents map[string]int, maxCount, barWidth i
 	return b.String()
 }
 
-func renderCommitList(w io.Writer, sty statsStyles, days []commitDay) {
+func renderCommitList(w io.Writer, sty activityStyles, days []commitDay) {
 	renderCommitListN(w, sty, days, 3)
 }
 
-func renderCommitListN(w io.Writer, sty statsStyles, days []commitDay, maxDays int) {
+func renderCommitListN(w io.Writer, sty activityStyles, days []commitDay, maxDays int) {
 	if len(days) == 0 {
 		return
 	}

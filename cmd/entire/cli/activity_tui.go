@@ -15,18 +15,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// statsDataMsg is sent when API data has been fetched.
-type statsDataMsg struct {
+// activityDataMsg is sent when API data has been fetched.
+type activityDataMsg struct {
 	stats  contributionStats
 	repos  []repoContribution
 	hourly []hourlyPoint
 	days   []commitDay
 }
 
-// statsErrMsg is sent when fetching fails.
-type statsErrMsg struct{ err error }
+// activityErrMsg is sent when fetching fails.
+type activityErrMsg struct{ err error }
 
-type statsModel struct {
+type activityModel struct {
 	// Data (nil until loaded)
 	stats  *contributionStats
 	repos  []repoContribution
@@ -44,19 +44,19 @@ type statsModel struct {
 
 	// View state
 	viewport viewport.Model
-	sty      statsStyles
+	sty      activityStyles
 	useColor bool
 	width    int
 	height   int
 	ready    bool
 }
 
-func runStatsTUI(ctx context.Context, client *api.Client) error {
+func runActivityTUI(ctx context.Context, client *api.Client) error {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	m := statsModel{
+	m := activityModel{
 		loading:  true,
 		spinner:  sp,
 		ctx:      ctx,
@@ -65,12 +65,12 @@ func runStatsTUI(ctx context.Context, client *api.Client) error {
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("stats TUI: %w", err)
+		return fmt.Errorf("activity TUI: %w", err)
 	}
 	return nil
 }
 
-func (m statsModel) fetchData() tea.Msg { //nolint:ireturn // bubbletea Cmd signature requires tea.Msg return
+func (m activityModel) fetchData() tea.Msg { //nolint:ireturn // bubbletea Cmd signature requires tea.Msg return
 	var checkpoints []userCheckpoint
 	var streakDates []string
 	var commits []userCommit
@@ -87,7 +87,7 @@ func (m statsModel) fetchData() tea.Msg { //nolint:ireturn // bubbletea Cmd sign
 		return err
 	})
 	if err := g.Wait(); err != nil {
-		return statsErrMsg{err: err}
+		return activityErrMsg{err: err}
 	}
 
 	stats := computeContributionStats(checkpoints, streakDates)
@@ -95,7 +95,7 @@ func (m statsModel) fetchData() tea.Msg { //nolint:ireturn // bubbletea Cmd sign
 	hourly := computeHourlyData(checkpoints)
 	days := groupCommitsByDay(commits)
 
-	return statsDataMsg{
+	return activityDataMsg{
 		stats:  stats,
 		repos:  repos,
 		hourly: hourly,
@@ -103,13 +103,13 @@ func (m statsModel) fetchData() tea.Msg { //nolint:ireturn // bubbletea Cmd sign
 	}
 }
 
-func (m statsModel) Init() tea.Cmd {
+func (m activityModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.fetchData)
 }
 
-func (m statsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:ireturn // bubbletea interface
+func (m activityModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:ireturn // bubbletea interface
 	switch msg := msg.(type) {
-	case statsDataMsg:
+	case activityDataMsg:
 		m.loading = false
 		m.stats = &msg.stats
 		m.repos = msg.repos
@@ -120,7 +120,7 @@ func (m statsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:ireturn 
 		}
 		return m, nil
 
-	case statsErrMsg:
+	case activityErrMsg:
 		m.loading = false
 		m.loadErr = msg.err
 		return m, nil
@@ -133,7 +133,7 @@ func (m statsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:ireturn 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.sty = newStatsStylesWithWidth(m.width, m.useColor)
+		m.sty = newActivityStylesWithWidth(m.width, m.useColor)
 		if m.stats != nil {
 			m = m.withViewport()
 		}
@@ -156,7 +156,7 @@ func (m statsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:ireturn 
 	return m, nil
 }
 
-func (m statsModel) withViewport() statsModel {
+func (m activityModel) withViewport() activityModel {
 	headerHeight := m.headerLineCount()
 	vpHeight := m.height - headerHeight - 1
 	if vpHeight < 1 {
@@ -174,13 +174,13 @@ func (m statsModel) withViewport() statsModel {
 	return m
 }
 
-func (m statsModel) View() string {
+func (m activityModel) View() string {
 	if m.loadErr != nil {
-		return fmt.Sprintf("\n  Failed to load stats: %s\n\n  Press q to quit.\n", m.loadErr)
+		return fmt.Sprintf("\n  Failed to load activity: %s\n\n  Press q to quit.\n", m.loadErr)
 	}
 
 	if m.loading {
-		return fmt.Sprintf("\n  %s Loading stats...\n", m.spinner.View())
+		return fmt.Sprintf("\n  %s Loading activity...\n", m.spinner.View())
 	}
 
 	if !m.ready {
@@ -195,7 +195,7 @@ func (m statsModel) View() string {
 	return b.String()
 }
 
-func (m statsModel) renderHeader() string {
+func (m activityModel) renderHeader() string {
 	if m.stats == nil {
 		return ""
 	}
@@ -210,17 +210,17 @@ func (m statsModel) renderHeader() string {
 	return buf.String()
 }
 
-func (m statsModel) headerLineCount() int {
+func (m activityModel) headerLineCount() int {
 	return strings.Count(m.renderHeader(), "\n")
 }
 
-func (m statsModel) renderCommits() string {
+func (m activityModel) renderCommits() string {
 	var buf bytes.Buffer
 	renderCommitListN(&buf, m.sty, m.days, -1)
 	return buf.String()
 }
 
-func (m statsModel) renderFooter() string {
+func (m activityModel) renderFooter() string {
 	if !m.sty.colorEnabled {
 		return ""
 	}
@@ -239,8 +239,8 @@ func (m statsModel) renderFooter() string {
 		scrollPct
 }
 
-func newStatsStylesWithWidth(width int, useColor bool) statsStyles {
-	return statsStyles{
+func newActivityStylesWithWidth(width int, useColor bool) activityStyles {
+	return activityStyles{
 		colorEnabled: useColor,
 		width:        width,
 		bold:         lipgloss.NewStyle().Bold(true),
