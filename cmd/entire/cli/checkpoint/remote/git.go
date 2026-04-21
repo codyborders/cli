@@ -59,12 +59,33 @@ func Fetch(ctx context.Context, opts FetchOptions) ([]byte, error) {
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
-	ensureEnv(cmd, "GIT_TERMINAL_PROMPT=0")
+	disableTerminalPrompt(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("git fetch: %w", err)
 	}
 	return out, nil
+}
+
+// FetchBlobs fetches specific objects (typically blobs) by hash from a remote.
+// Unlike Fetch, this never applies --filter=blob:none (which would be
+// contradictory — the point is to download specific blobs) and always uses
+// --no-write-fetch-head to avoid polluting FETCH_HEAD.
+//
+// The remote should be a URL (not a remote name) to avoid persisting promisor
+// settings onto the named remote. Use resolveCheckpointFetchTarget or
+// FetchURL to obtain the URL.
+func FetchBlobs(ctx context.Context, remote string, hashes []string) error {
+	args := []string{"fetch", "--no-tags", "--no-write-fetch-head", remote}
+	args = append(args, hashes...)
+
+	cmd := newCommand(ctx, args...)
+	disableTerminalPrompt(cmd)
+	_, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git fetch blobs: %w", err)
+	}
+	return nil
 }
 
 // PushResult holds raw porcelain output from git push.
@@ -76,7 +97,7 @@ type PushResult struct {
 // GIT_TERMINAL_PROMPT=0 is always set.
 func Push(ctx context.Context, remote, refSpec string) (PushResult, error) {
 	cmd := newCommand(ctx, "push", "--no-verify", "--porcelain", remote, refSpec)
-	ensureEnv(cmd, "GIT_TERMINAL_PROMPT=0")
+	disableTerminalPrompt(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return PushResult{Output: string(output)}, fmt.Errorf("git push: %w", err)
@@ -101,7 +122,7 @@ func lsRemote(ctx context.Context, dir, remote string, patterns ...string) ([]by
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	ensureEnv(cmd, "GIT_TERMINAL_PROMPT=0")
+	disableTerminalPrompt(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return out, fmt.Errorf("git ls-remote: %w", err)
@@ -254,11 +275,11 @@ func resolveTargetProtocol(ctx context.Context, target string) string {
 	return info.Protocol
 }
 
-// ensureEnv appends an environment variable to the command, initializing
-// cmd.Env from os.Environ() if it is nil.
-func ensureEnv(cmd *exec.Cmd, envVar string) {
+// disableTerminalPrompt sets GIT_TERMINAL_PROMPT=0 on the command,
+// initializing cmd.Env from os.Environ() if nil.
+func disableTerminalPrompt(cmd *exec.Cmd) {
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
 	}
-	cmd.Env = append(cmd.Env, envVar)
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 }
