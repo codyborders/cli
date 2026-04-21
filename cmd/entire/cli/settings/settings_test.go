@@ -804,7 +804,7 @@ func TestCheckpointsVersion(t *testing.T) {
 		{"zero falls back to default", map[string]any{"checkpoints_version": 0}, 1},
 		{"negative falls back to default", map[string]any{"checkpoints_version": -1}, 1},
 		{"non-integer float falls back to default", map[string]any{"checkpoints_version": 2.5}, 1},
-		{"string falls back to default", map[string]any{"checkpoints_version": "2"}, 1},
+		{"string 2", map[string]any{"checkpoints_version": "2"}, 2},
 		{"bool falls back to default", map[string]any{"checkpoints_version": true}, 1},
 	}
 

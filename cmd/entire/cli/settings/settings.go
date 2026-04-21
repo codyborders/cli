@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -745,15 +746,19 @@ func (s *EntireSettings) CheckpointsVersion() int {
 		})
 	}
 
-	switch v := val.(type) {
-	case int:
-		if v == 1 || v == 2 {
-			return v
-		}
-	case float64:
-		intV := int(v)
-		if v == float64(intV) && (intV == 1 || intV == 2) {
-			return intV
+	v, ok := val.(int)
+	if ok && (v == 1 || v == 2) {
+		return v
+	}
+	floatV, ok := val.(float64)
+	if ok && (floatV == 1 || floatV == 2) {
+		return int(floatV)
+	}
+	stringV, ok := val.(string)
+	if ok {
+		parsed, err := strconv.Atoi(stringV)
+		if err == nil && (parsed == 1 || parsed == 2) {
+			return parsed
 		}
 	}
 	warnUnsupported(val)
