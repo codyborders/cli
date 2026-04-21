@@ -800,7 +800,7 @@ func TestCheckpointsVersion(t *testing.T) {
 		{"empty options defaults to one", map[string]any{}, 1},
 		{"integer 2", map[string]any{"checkpoints_version": 2}, 2},
 		{"float 2 from json", map[string]any{"checkpoints_version": float64(2)}, 2},
-		{"integer 3 (not yet supported but surfaced)", map[string]any{"checkpoints_version": 3}, 3},
+		{"integer 3 falls back to default", map[string]any{"checkpoints_version": 3}, 1},
 		{"zero falls back to default", map[string]any{"checkpoints_version": 0}, 1},
 		{"negative falls back to default", map[string]any{"checkpoints_version": -1}, 1},
 		{"non-integer float falls back to default", map[string]any{"checkpoints_version": 2.5}, 1},

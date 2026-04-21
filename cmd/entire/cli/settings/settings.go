@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/jsonutil"
@@ -26,6 +27,8 @@ const (
 	// checkpoints v2 raw-transcript generations when no override is configured.
 	defaultGenerationRetentionDays = 60
 )
+
+var checkpointsVersionWarningOnce sync.Once
 
 // Commit linking mode constants.
 const (
@@ -722,8 +725,8 @@ func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
 }
 
 // CheckpointsVersion returns the configured checkpoints format version from
-// strategy_options.checkpoints_version. Returns 1 when unset or when the value
-// is not a positive integer. 2 is the only other supported version.
+// strategy_options.checkpoints_version. Returns 1 when unset, invalid, or
+// unsupported. The currently supported versions are 1 and 2.
 func (s *EntireSettings) CheckpointsVersion() int {
 	if s.StrategyOptions == nil {
 		return 1
@@ -732,17 +735,28 @@ func (s *EntireSettings) CheckpointsVersion() int {
 	if !ok {
 		return 1
 	}
+
+	warnUnsupported := func(configured any) {
+		checkpointsVersionWarningOnce.Do(func() {
+			fmt.Fprintf(os.Stderr,
+				"[entire] unsupported checkpoints version %v detected in settings. Falling back to latest supported version (1).\n",
+				configured,
+			)
+		})
+	}
+
 	switch v := val.(type) {
 	case int:
-		if v > 0 {
+		if v == 1 || v == 2 {
 			return v
 		}
 	case float64:
 		intV := int(v)
-		if intV > 0 && v == float64(intV) {
+		if v == float64(intV) && (intV == 1 || intV == 2) {
 			return intV
 		}
 	}
+	warnUnsupported(val)
 	return 1
 }
 
