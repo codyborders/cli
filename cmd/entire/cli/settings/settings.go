@@ -618,7 +618,20 @@ func CheckpointsVersion(ctx context.Context) int {
 	if err != nil {
 		return 1
 	}
-	return s.CheckpointsVersion()
+	version := s.CheckpointsVersion()
+	if s.StrategyOptions != nil {
+		if configured, ok := s.StrategyOptions["checkpoints_version"]; ok {
+			if _, supported := parseCheckpointsVersion(configured); !supported {
+				checkpointsVersionWarningOnce.Do(func() {
+					fmt.Fprintf(os.Stderr,
+						"[entire] unsupported strategy_options.checkpoints_version %v detected in settings. Falling back to the default version (1).\n",
+						configured,
+					)
+				})
+			}
+		}
+	}
+	return version
 }
 
 // IsPushV2RefsEnabled checks if pushing v2 refs is enabled in settings.
@@ -736,33 +749,30 @@ func (s *EntireSettings) CheckpointsVersion() int {
 	if !ok {
 		return 1
 	}
-
-	warnUnsupported := func(configured any) {
-		checkpointsVersionWarningOnce.Do(func() {
-			fmt.Fprintf(os.Stderr,
-				"[entire] unsupported checkpoints version %v detected in settings. Falling back to the default version (1).\n",
-				configured,
-			)
-		})
+	version, ok := parseCheckpointsVersion(val)
+	if ok {
+		return version
 	}
+	return 1
+}
 
+func parseCheckpointsVersion(val any) (int, bool) {
 	v, ok := val.(int)
 	if ok && (v == 1 || v == 2) {
-		return v
+		return v, true
 	}
 	floatV, ok := val.(float64)
 	if ok && (floatV == 1 || floatV == 2) {
-		return int(floatV)
+		return int(floatV), true
 	}
 	stringV, ok := val.(string)
 	if ok {
 		parsed, err := strconv.Atoi(stringV)
 		if err == nil && (parsed == 1 || parsed == 2) {
-			return parsed
+			return parsed, true
 		}
 	}
-	warnUnsupported(val)
-	return 1
+	return 1, false
 }
 
 // IsPushV2RefsEnabled checks if pushing v2 refs is enabled.

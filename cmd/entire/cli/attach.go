@@ -183,8 +183,9 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 			return fmt.Errorf("failed to write checkpoint: %w", err)
 		}
 	}
-	// IsCheckpointsV2Enabled is true whenever checkpoints_version is 2, so this
-	// covers both the v2 and dual-write paths. Only v2 propagates the error.
+	// IsCheckpointsV2Enabled is true whenever v2 writes are enabled, including
+	// both v2-only mode (checkpoints_version == 2) and dual-write mode. Only
+	// v2-only mode propagates the error.
 	if settings.IsCheckpointsV2Enabled(logCtx) {
 		if err := writeAttachCheckpointV2(logCtx, repo, writeOpts); err != nil {
 			if v2 {
