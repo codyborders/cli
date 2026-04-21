@@ -19,6 +19,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExtractRemoteFromArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"fetch with URL", []string{"fetch", "https://github.com/org/repo.git", "refs/heads/main"}, "https://github.com/org/repo.git"},
+		{"push with flags", []string{"push", "--no-verify", "--porcelain", "origin", "main"}, "origin"},
+		{"ls-remote", []string{"ls-remote", "origin", "refs/heads/*"}, "origin"},
+		{"fetch with filter", []string{"fetch", "--no-tags", "--filter=blob:none", "https://host/r.git", "+refs/heads/main:refs/tmp"}, "https://host/r.git"},
+		{"empty args", []string{}, ""},
+		{"subcommand only", []string{"fetch"}, ""},
+		{"only flags", []string{"fetch", "--no-tags"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, extractRemoteFromArgs(tt.args))
+		})
+	}
+}
+
 func TestResolveTargetProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -205,7 +230,7 @@ func TestIsValidToken(t *testing.T) {
 func TestCheckpointGitCommand_ControlCharsInToken(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "token\r\nEvil: injected-header")
 
-	cmd := CheckpointGitCommand(context.Background(), "https://github.com/org/repo.git", "fetch", "origin")
+	cmd := CheckpointGitCommand(context.Background(), "fetch", "https://github.com/org/repo.git")
 	assert.Nil(t, cmd.Env, "env should not be set when token contains control characters")
 }
 
@@ -213,7 +238,7 @@ func TestCheckpointGitCommand_ControlCharsInToken(t *testing.T) {
 func TestCheckpointGitCommand_NoToken(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "")
 
-	cmd := CheckpointGitCommand(context.Background(), "https://github.com/org/repo.git", "fetch", "origin")
+	cmd := CheckpointGitCommand(context.Background(), "fetch", "https://github.com/org/repo.git")
 	assert.Nil(t, cmd.Stdin, "stdin should be nil")
 	// No env override when token is empty
 	assert.Nil(t, cmd.Env, "env should not be set when token is empty")
@@ -223,7 +248,7 @@ func TestCheckpointGitCommand_NoToken(t *testing.T) {
 func TestCheckpointGitCommand_WhitespaceToken(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "   ")
 
-	cmd := CheckpointGitCommand(context.Background(), "https://github.com/org/repo.git", "fetch", "origin")
+	cmd := CheckpointGitCommand(context.Background(), "fetch", "https://github.com/org/repo.git")
 	assert.Nil(t, cmd.Env, "env should not be set when token is only whitespace")
 }
 
@@ -231,7 +256,7 @@ func TestCheckpointGitCommand_WhitespaceToken(t *testing.T) {
 func TestCheckpointGitCommand_HTTPS_InjectsToken(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "ghp_test123")
 
-	cmd := CheckpointGitCommand(context.Background(), "https://github.com/org/repo.git", "fetch", "origin")
+	cmd := CheckpointGitCommand(context.Background(), "fetch", "https://github.com/org/repo.git")
 	require.NotNil(t, cmd.Env, "env should be set for HTTPS with token")
 
 	envMap := envToMap(cmd.Env)
@@ -256,7 +281,7 @@ func TestCheckpointGitCommand_SSH_WarnsAndSkips(t *testing.T) {
 	t.Cleanup(func() { os.Stderr = oldStderr })
 	os.Stderr = w
 
-	cmd := CheckpointGitCommand(context.Background(), "git@github.com:org/repo.git", "push", "origin", "main")
+	cmd := CheckpointGitCommand(context.Background(), "push", "git@github.com:org/repo.git", "main")
 
 	w.Close()
 	os.Stderr = oldStderr
@@ -276,7 +301,7 @@ func TestCheckpointGitCommand_SSH_WarnsAndSkips(t *testing.T) {
 func TestCheckpointGitCommand_LocalPath_NoToken(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "ghp_test123")
 
-	cmd := CheckpointGitCommand(context.Background(), "/tmp/bare-repo", "push", "/tmp/bare-repo", "main")
+	cmd := CheckpointGitCommand(context.Background(), "push", "/tmp/bare-repo", "main")
 	assert.Nil(t, cmd.Env, "env should NOT be set for local path targets")
 }
 
@@ -331,7 +356,7 @@ func TestCheckpointToken_HTTPSServer_SendsAuthHeader(t *testing.T) {
 	tmpDir := setupTokenTestRepo(t)
 
 	target := srv.URL + "/org/repo.git"
-	cmd := CheckpointGitCommand(context.Background(), target,
+	cmd := CheckpointGitCommand(context.Background(),
 		"fetch", target, "+refs/heads/main:refs/remotes/origin/main")
 	cmd.Dir = tmpDir
 	// GIT_SSL_NO_VERIFY=1 trusts the self-signed TLS cert from httptest
@@ -357,7 +382,7 @@ func TestCheckpointToken_HTTPSServer_NoTokenNoHeader(t *testing.T) {
 	tmpDir := setupTokenTestRepo(t)
 
 	target := srv.URL + "/org/repo.git"
-	cmd := CheckpointGitCommand(context.Background(), target,
+	cmd := CheckpointGitCommand(context.Background(),
 		"fetch", target, "+refs/heads/main:refs/remotes/origin/main")
 	cmd.Dir = tmpDir
 	if cmd.Env == nil {
@@ -382,7 +407,7 @@ func TestCheckpointToken_HTTPSServer_LsRemoteSendsAuthHeader(t *testing.T) {
 	tmpDir := setupTokenTestRepo(t)
 
 	target := srv.URL + "/org/repo.git"
-	cmd := CheckpointGitCommand(context.Background(), target,
+	cmd := CheckpointGitCommand(context.Background(),
 		"ls-remote", target)
 	cmd.Dir = tmpDir
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GIT_SSL_NO_VERIFY=1")
@@ -402,7 +427,7 @@ func TestCheckpointToken_HTTPSServer_LsRemoteSendsAuthHeader(t *testing.T) {
 func TestCheckpointToken_GIT_TERMINAL_PROMPT_Coexistence(t *testing.T) {
 	t.Setenv(CheckpointTokenEnvVar, "coexist-token")
 
-	cmd := CheckpointGitCommand(context.Background(), "https://github.com/org/repo.git",
+	cmd := CheckpointGitCommand(context.Background(),
 		"fetch", "--no-tags", "--filter=blob:none", "https://github.com/org/repo.git", "refs/heads/main")
 	require.NotNil(t, cmd.Env)
 

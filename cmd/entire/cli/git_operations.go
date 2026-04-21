@@ -361,7 +361,7 @@ func FetchAndCheckoutRemoteBranch(ctx context.Context, branchName string) error 
 
 	refSpec := fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branchName, branchName)
 
-	fetchCmd := strategy.CheckpointGitCommand(ctx, "origin", "fetch", "origin", refSpec)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, "fetch", "origin", refSpec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("fetch timed out after 2 minutes")
@@ -431,7 +431,7 @@ func fetchMetadataFromOrigin(ctx context.Context, shallow bool) error {
 	args = append(args, fetchTarget, refSpec)
 
 	fetchArgs := strategy.AppendFetchFilterArgs(ctx, args)
-	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchArgs...)
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("fetch timed out after 2 minutes")
@@ -490,7 +490,7 @@ func fetchV2MainFromOrigin(ctx context.Context, shallow bool) error {
 	args = append(args, fetchTarget, refSpec)
 
 	fetchArgs := strategy.AppendFetchFilterArgs(ctx, args)
-	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchArgs...)
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("v2 fetch timed out after 2 minutes")
@@ -578,7 +578,7 @@ func FetchBlobsByHash(ctx context.Context, hashes []plumbing.Hash) error {
 		args = append(args, h.String())
 	}
 
-	fetchCmd := strategy.CheckpointGitCommand(ctx, fetchTarget, args...)
+	fetchCmd := strategy.CheckpointGitCommand(ctx, args...)
 	if _, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		logging.Debug(ctx, "fetch-by-hash failed, falling back to full metadata fetch",
 			slog.Int("blob_count", len(hashes)),

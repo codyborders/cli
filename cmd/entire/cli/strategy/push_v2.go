@@ -49,7 +49,7 @@ func tryPushRef(ctx context.Context, target string, refName plumbing.ReferenceNa
 	// Use --no-verify to prevent recursive hook calls (this runs inside pre-push).
 	// Use --porcelain for machine-readable, locale-independent output.
 	refSpec := fmt.Sprintf("%s:%s", refName, refName)
-	cmd := CheckpointGitCommand(ctx, target, "push", "--no-verify", "--porcelain", target, refSpec)
+	cmd := CheckpointGitCommand(ctx, "push", "--no-verify", "--porcelain", target, refSpec)
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
@@ -130,7 +130,7 @@ func fetchAndMergeRef(ctx context.Context, target string, refName plumbing.Refer
 	// and trees, skipping blobs. The merge only needs the tree structure to
 	// combine entries; blobs are already local or fetched on demand.
 	fetchArgs := AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, refSpec})
-	fetchCmd := CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	fetchCmd := CheckpointGitCommand(ctx, fetchArgs...)
 	fetchCmd.Env = append(fetchCmd.Env, "GIT_TERMINAL_PROMPT=0")
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch failed: %s", output)
@@ -213,7 +213,7 @@ func detectRemoteOnlyArchives(ctx context.Context, target string, repo *git.Repo
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := CheckpointGitCommand(ctx, target, "ls-remote", target, paths.V2FullRefPrefix+"*")
+	cmd := CheckpointGitCommand(ctx, "ls-remote", target, paths.V2FullRefPrefix+"*")
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.Output()
 	if err != nil {
@@ -258,7 +258,7 @@ func handleRotationConflict(ctx context.Context, target, fetchTarget string, rep
 	archiveTmpRef := plumbing.ReferenceName("refs/entire-fetch-tmp/archive-" + latestArchive)
 	archiveRefSpec := fmt.Sprintf("+%s:%s", archiveRefName, archiveTmpRef)
 	fetchArgs := AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, archiveRefSpec})
-	fetchCmd := CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	fetchCmd := CheckpointGitCommand(ctx, fetchArgs...)
 	fetchCmd.Env = append(fetchCmd.Env, "GIT_TERMINAL_PROMPT=0")
 	if output, fetchErr := fetchCmd.CombinedOutput(); fetchErr != nil {
 		return fmt.Errorf("fetch archived generation failed: %s", output)

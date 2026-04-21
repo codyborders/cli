@@ -145,7 +145,7 @@ func fetchURLIntoTmpRef(ctx context.Context, remoteURL, srcRef, tmpRef, label st
 
 	refSpec := fmt.Sprintf("+%s:%s", srcRef, tmpRef)
 	fetchArgs := AppendFetchFilterArgs(fetchCtx, []string{"fetch", "--no-tags", remoteURL, refSpec})
-	fetchCmd := CheckpointGitCommand(fetchCtx, remoteURL, fetchArgs...)
+	fetchCmd := CheckpointGitCommand(fetchCtx, fetchArgs...)
 	if fetchCmd.Env == nil {
 		fetchCmd.Env = os.Environ()
 	}

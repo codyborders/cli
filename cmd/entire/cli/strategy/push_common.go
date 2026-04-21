@@ -265,7 +265,7 @@ func tryPushSessionsCommon(ctx context.Context, remote, branchName string) (push
 
 	// Use --no-verify to prevent recursive hook calls.
 	// Use --porcelain for machine-readable, locale-independent output.
-	cmd := CheckpointGitCommand(ctx, remote, "push", "--no-verify", "--porcelain", remote, branchName)
+	cmd := CheckpointGitCommand(ctx, "push", "--no-verify", "--porcelain", remote, branchName)
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
@@ -314,7 +314,7 @@ func fetchAndRebaseSessionsCommon(ctx context.Context, target, branchName string
 	// and trees, skipping blobs. The merge only needs the tree structure to
 	// combine entries; blobs are already local or fetched on demand.
 	fetchArgs := AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, refSpec})
-	fetchCmd := CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	fetchCmd := CheckpointGitCommand(ctx, fetchArgs...)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch failed: %s", output)
 	}

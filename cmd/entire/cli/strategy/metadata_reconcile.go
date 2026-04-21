@@ -369,7 +369,7 @@ func lsRemoteRef(ctx context.Context, repoPath, remoteName, refName string) (plu
 		return plumbing.ZeroHash, fmt.Errorf("resolve fetch target for ls-remote: %w", err)
 	}
 
-	cmd := CheckpointGitCommand(ctx, fetchTarget, "ls-remote", fetchTarget, refName)
+	cmd := CheckpointGitCommand(ctx, "ls-remote", fetchTarget, refName)
 	cmd.Dir = repoPath
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
@@ -405,7 +405,7 @@ func fetchRefToTemp(ctx context.Context, repoPath, remoteName, srcRef, dstRef st
 
 	refspec := fmt.Sprintf("+%s:%s", srcRef, dstRef)
 	fetchArgs := AppendFetchFilterArgs(ctx, []string{"fetch", "--no-tags", fetchTarget, refspec})
-	cmd := CheckpointGitCommand(ctx, fetchTarget, fetchArgs...)
+	cmd := CheckpointGitCommand(ctx, fetchArgs...)
 	cmd.Dir = repoPath
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()

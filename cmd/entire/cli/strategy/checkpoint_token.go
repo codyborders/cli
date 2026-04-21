@@ -25,21 +25,16 @@ var sshTokenWarningOnce sync.Once
 
 // CheckpointGitCommand creates an exec.Cmd for a git operation that may need
 // checkpoint token authentication. If ENTIRE_CHECKPOINT_TOKEN is set and the
-// target resolves to an HTTPS remote, a Basic auth token is injected via
+// remote in args resolves to an HTTPS URL, a Basic auth token is injected via
 // GIT_CONFIG_COUNT/GIT_CONFIG_KEY_*/GIT_CONFIG_VALUE_* environment variables.
 //
 // For SSH remotes, a warning is printed once to stderr and the token is not injected.
 // For empty/unset tokens, the command is returned unmodified.
 //
-// The target parameter is used ONLY for protocol detection (SSH vs HTTPS) and does
-// not affect the command executed. It should match the effective transport target
-// used in args after any checkpoint remote resolution. It can be:
-//   - A URL (e.g., "https://github.com/org/repo.git")
-//   - A remote name (e.g., "origin") when the command is actually using that name
-//
-// The actual remote must be specified again inside args, which contains the full
-// git command arguments (e.g., "push", "--no-verify", remote, branch).
-func CheckpointGitCommand(ctx context.Context, target string, args ...string) *exec.Cmd {
+// The remote is extracted from args by skipping the git subcommand and any flags
+// (arguments starting with "-"). For example, in
+// ["push", "--no-verify", "origin", "main"], the remote is "origin".
+func CheckpointGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Stdin = nil // Disconnect stdin to prevent hanging in hook context
 
@@ -50,6 +45,11 @@ func CheckpointGitCommand(ctx context.Context, target string, args ...string) *e
 
 	if !isValidToken(token) {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: %s contains invalid characters (CR, LF, or other control chars) — token ignored\n", CheckpointTokenEnvVar)
+		return cmd
+	}
+
+	target := extractRemoteFromArgs(args)
+	if target == "" {
 		return cmd
 	}
 
@@ -68,6 +68,22 @@ func CheckpointGitCommand(ctx context.Context, target string, args ...string) *e
 		// Unknown protocol (e.g., local path, or resolution failed) — don't inject
 		return cmd
 	}
+}
+
+// extractRemoteFromArgs finds the remote URL or name from git command args.
+// It skips the subcommand (first arg) and any flags (args starting with "-"),
+// returning the first positional argument, which is the remote for push/fetch/ls-remote.
+func extractRemoteFromArgs(args []string) string {
+	if len(args) < 2 {
+		return ""
+	}
+	// Skip subcommand (e.g., "push", "fetch", "ls-remote").
+	for _, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+	}
+	return ""
 }
 
 // appendCheckpointTokenEnv appends GIT_CONFIG_COUNT-based env vars to inject
