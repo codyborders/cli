@@ -607,14 +607,14 @@ func IsCheckpointsV2Enabled(ctx context.Context) bool {
 	return settings.IsCheckpointsV2Enabled()
 }
 
-// IsCheckpointsV2OnlyEnabled checks if checkpoints should be written and pushed
-// only via v2 refs.
-func IsCheckpointsV2OnlyEnabled(ctx context.Context) bool {
+// CheckpointsVersion returns the configured checkpoints format version, or 0
+// if settings cannot be loaded or the value is unset/invalid.
+func CheckpointsVersion(ctx context.Context) int {
 	s, err := Load(ctx)
 	if err != nil {
-		return false
+		return 0
 	}
-	return s.IsCheckpointsV2OnlyEnabled()
+	return s.CheckpointsVersion()
 }
 
 // IsPushV2RefsEnabled checks if pushing v2 refs is enabled in settings.
@@ -709,9 +709,9 @@ func (s *EntireSettings) GetCheckpointRemote() *CheckpointRemoteConfig {
 }
 
 // IsCheckpointsV2Enabled checks if checkpoints v2 is enabled.
-// Returns true when either checkpoints_v2 or checkpoints_v2_only is enabled.
+// Returns true when either checkpoints_v2 is set or checkpoints_version is 2.
 func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
-	if s.IsCheckpointsV2OnlyEnabled() {
+	if s.CheckpointsVersion() == 2 {
 		return true
 	}
 	if s.StrategyOptions == nil {
@@ -721,20 +721,35 @@ func (s *EntireSettings) IsCheckpointsV2Enabled() bool {
 	return ok && val
 }
 
-// IsCheckpointsV2OnlyEnabled checks if checkpoints should be written and pushed
-// only via v2 refs, with no v1 dual-write.
-func (s *EntireSettings) IsCheckpointsV2OnlyEnabled() bool {
+// CheckpointsVersion returns the configured checkpoints format version from
+// strategy_options.checkpoints_version. Returns 0 when unset or when the value
+// is not a positive integer. 2 is the first and only supported version.
+func (s *EntireSettings) CheckpointsVersion() int {
 	if s.StrategyOptions == nil {
-		return false
+		return 0
 	}
-	val, ok := s.StrategyOptions["checkpoints_v2_only"].(bool)
-	return ok && val
+	val, ok := s.StrategyOptions["checkpoints_version"]
+	if !ok {
+		return 0
+	}
+	switch v := val.(type) {
+	case int:
+		if v > 0 {
+			return v
+		}
+	case float64:
+		intV := int(v)
+		if intV > 0 && v == float64(intV) {
+			return intV
+		}
+	}
+	return 0
 }
 
 // IsPushV2RefsEnabled checks if pushing v2 refs is enabled.
-// checkpoints_v2_only forces v2 ref pushes on, regardless of push_v2_refs.
+// checkpoints_version: 2 forces v2 ref pushes on, regardless of push_v2_refs.
 func (s *EntireSettings) IsPushV2RefsEnabled() bool {
-	if s.IsCheckpointsV2OnlyEnabled() {
+	if s.CheckpointsVersion() == 2 {
 		return true
 	}
 	if !s.IsCheckpointsV2Enabled() {
