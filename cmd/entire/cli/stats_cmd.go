@@ -17,7 +17,7 @@ const (
 	agentUnknown   = "unknown"
 	dateUnknown    = "unknown"
 	statsTimeframe = "last-month"
-	statsLimit     = 500
+	statsLimit     = 1000
 )
 
 // knownAgents maps normalized agent strings from the API to display IDs.
@@ -243,7 +243,10 @@ func computeRepoContributions(checkpoints []userCheckpoint) []repoContribution {
 		result = append(result, *rc)
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].Total > result[j].Total
+		if result[i].Total != result[j].Total {
+			return result[i].Total > result[j].Total
+		}
+		return result[i].Repo < result[j].Repo
 	})
 	return result
 }
