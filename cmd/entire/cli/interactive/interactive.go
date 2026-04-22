@@ -5,13 +5,13 @@ package interactive
 
 import "os"
 
-// HasTTY checks if /dev/tty is available for interactive prompts.
+// CanPromptInteractively checks if /dev/tty is available for interactive prompts.
 // Returns false when running as an agent subprocess (no controlling terminal).
 //
 // In test environments, ENTIRE_TEST_TTY overrides the real check:
 //   - ENTIRE_TEST_TTY=1 → simulate human (TTY available)
 //   - ENTIRE_TEST_TTY=0 → simulate agent (no TTY)
-func HasTTY() bool {
+func CanPromptInteractively() bool {
 	if v := os.Getenv("ENTIRE_TEST_TTY"); v != "" {
 		return v == "1"
 	}

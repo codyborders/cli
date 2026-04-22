@@ -180,7 +180,7 @@ func runGitHubBootstrapInitWith(ctx context.Context, w, errW io.Writer, opts Git
 	// prompts. Skip the confirm when any gh-specific flag is set (the flag
 	// implies intent) or when we're non-interactive (keep the documented
 	// happy path: default to yes).
-	if useGitHub && !opts.Yes && !ghFlagsProvided(opts) && interactive.HasTTY() {
+	if useGitHub && !opts.Yes && !ghFlagsProvided(opts) && interactive.CanPromptInteractively() {
 		confirmed, err := confirmCreateGitHubRepo()
 		if err != nil {
 			return nil, err
@@ -309,7 +309,7 @@ func ghFlagsProvided(opts GitHubBootstrapOptions) bool {
 
 // confirmCreateGitHubRepo asks the user whether they want to also create
 // a matching GitHub repository. Interactive-only; callers gate on
-// interactive.HasTTY.
+// interactive.CanPromptInteractively.
 func confirmCreateGitHubRepo() (bool, error) {
 	confirmed := true
 	form := NewAccessibleForm(
@@ -340,7 +340,7 @@ func confirmInitRepo(_ io.Writer, cwd string, opts GitHubBootstrapOptions) (bool
 	if opts.InitRepo || opts.Yes {
 		return true, nil
 	}
-	if !interactive.HasTTY() {
+	if !interactive.CanPromptInteractively() {
 		return false, nil
 	}
 
@@ -412,7 +412,7 @@ func resolveOwner(w io.Writer, currentUser string, orgs []string, opts GitHubBoo
 		fmt.Fprintf(w, "  Using GitHub owner: %s\n", currentUser)
 		return currentUser, nil
 	}
-	if !interactive.HasTTY() {
+	if !interactive.CanPromptInteractively() {
 		return currentUser, nil
 	}
 
@@ -468,13 +468,13 @@ func resolveRepoName(ctx context.Context, w, errW io.Writer, runner bootstrapRun
 		}
 		// Name taken. If a TTY is available, fall back to the interactive
 		// prompt so the user can pick a different name instead of failing.
-		if interactive.HasTTY() {
+		if interactive.CanPromptInteractively() {
 			fmt.Fprintf(w, "  %s/%s already exists on GitHub.\n", owner, suggested)
 		} else {
 			return "", fmt.Errorf("repository %s/%s already exists on GitHub (use --repo-name to specify a different name)", owner, suggested)
 		}
 	}
-	if !interactive.HasTTY() {
+	if !interactive.CanPromptInteractively() {
 		return suggested, nil
 	}
 
@@ -532,7 +532,7 @@ func resolveVisibility(owner, currentUser string, opts GitHubBootstrapOptions) (
 			return "", fmt.Errorf("invalid visibility %q: must be one of public, private, internal", opts.RepoVisibility)
 		}
 	}
-	if opts.Yes || !interactive.HasTTY() {
+	if opts.Yes || !interactive.CanPromptInteractively() {
 		return visibilityPrivate, nil
 	}
 
@@ -574,7 +574,7 @@ func resolveCommitMessage(opts GitHubBootstrapOptions) (string, bool, error) {
 	if opts.InitialCommitMessage != "" {
 		return opts.InitialCommitMessage, true, nil
 	}
-	if opts.Yes || !interactive.HasTTY() {
+	if opts.Yes || !interactive.CanPromptInteractively() {
 		return defaultMsg, true, nil
 	}
 
@@ -736,7 +736,7 @@ func resolveGitIdentity(w io.Writer, existingName, existingEmail, ghName, ghEmai
 		return name, email, nil
 	}
 
-	if !interactive.HasTTY() {
+	if !interactive.CanPromptInteractively() {
 		return "", "", errors.New(`git identity not configured. Set it with:
   git config --global user.name "Your Name"
   git config --global user.email "you@example.com"`)

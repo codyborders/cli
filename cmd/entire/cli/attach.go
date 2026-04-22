@@ -438,7 +438,7 @@ func promptAmendCommit(ctx context.Context, w io.Writer, headCommit *object.Comm
 
 	amend := true
 	if !force {
-		if !interactive.HasTTY() {
+		if !interactive.CanPromptInteractively() {
 			// Non-interactive: can't prompt, print trailer for manual use.
 			fmt.Fprintf(w, "\nCopy to your commit message to attach:\n\n  Entire-Checkpoint: %s\n", checkpointIDStr)
 			return nil

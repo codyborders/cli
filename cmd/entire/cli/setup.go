@@ -324,7 +324,7 @@ func runManageAgents(ctx context.Context, w io.Writer, opts EnableOptions, selec
 
 	// When no selectFn is provided, check if we can prompt interactively.
 	// A selectFn (e.g. from --yes) bypasses the interactive prompt entirely.
-	if selectFn == nil && !interactive.HasTTY() {
+	if selectFn == nil && !interactive.CanPromptInteractively() {
 		fmt.Fprintln(w, "Cannot show agent selection in non-interactive mode.")
 		fmt.Fprintln(w, "Use: entire configure --agent <name>")
 		return nil
@@ -1232,7 +1232,7 @@ func detectOrSelectAgent(ctx context.Context, w io.Writer, selectFn func(availab
 
 	// When no selectFn is provided, check if we can prompt interactively.
 	// A selectFn (e.g. from --yes) bypasses the interactive prompt entirely.
-	if selectFn == nil && !interactive.HasTTY() {
+	if selectFn == nil && !interactive.CanPromptInteractively() {
 		if hasInstalledHooks {
 			// Re-run without TTY — keep currently installed agents
 			agents := make([]agent.Agent, 0, len(installedAgentNames))
@@ -1808,7 +1808,7 @@ func maybePromptVercelDeploymentDisable(ctx context.Context, w io.Writer, target
 		}
 
 		if promptFn == nil {
-			if !interactive.HasTTY() {
+			if !interactive.CanPromptInteractively() {
 				fmt.Fprintf(w, "Note: Vercel detected. Run `entire configure` interactively to disable deployments for `%s` branches.\n", vercelconfig.BranchPattern)
 				return false, nil
 			}

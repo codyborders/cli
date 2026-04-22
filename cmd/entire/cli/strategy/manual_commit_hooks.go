@@ -48,7 +48,7 @@ const (
 )
 
 // askConfirmTTY prompts the user via /dev/tty whether to link a commit to session context.
-// This requires a controlling terminal — callers must check interactive.HasTTY() first and handle
+// This requires a controlling terminal — callers must check interactive.CanPromptInteractively() first and handle
 // the no-TTY case (agent subprocesses, CI) themselves.
 //
 // header is displayed as the first line (e.g., "Entire: Active Claude Code session").
@@ -60,7 +60,7 @@ func askConfirmTTY(header string, details []string, prompt string, defaultYes bo
 	}
 
 	// In test mode, don't try to interact with the real TTY — just use the default.
-	// ENTIRE_TEST_TTY=1 simulates "a human is present" for the hasTTY() check
+	// ENTIRE_TEST_TTY=1 simulates "a human is present" for the CanPromptInteractively() check
 	// but we can't actually read from the TTY in tests.
 	if os.Getenv("ENTIRE_TEST_TTY") != "" {
 		return defaultResult
@@ -498,7 +498,7 @@ func (s *ManualCommitStrategy) PrepareCommitMsg(ctx context.Context, commitMsgFi
 	case "message":
 		// Using -m or -F: behavior depends on TTY availability and commit_linking setting
 		switch {
-		case !interactive.HasTTY():
+		case !interactive.CanPromptInteractively():
 			// No TTY (agent subprocess, CI) — auto-link without prompting
 			message = addCheckpointTrailer(message, checkpointID)
 		case commitLinking == settings.CommitLinkingAlways:
@@ -2003,7 +2003,7 @@ func (s *ManualCommitStrategy) warnIfAttributionDiverged(ctx context.Context, se
 //     have /dev/tty but can't respond to prompts, and content detection fails
 //     since the shadow branch doesn't exist yet).
 func (s *ManualCommitStrategy) tryAgentCommitFastPath(ctx context.Context, commitMsgFile string, sessions []*SessionState, source string) bool {
-	noTTY := !interactive.HasTTY()
+	noTTY := !interactive.CanPromptInteractively()
 	skipContentDetection := noTTY
 	if !skipContentDetection {
 		if stngs, err := settings.Load(ctx); err == nil {
