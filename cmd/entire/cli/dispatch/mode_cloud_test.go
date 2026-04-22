@@ -17,10 +17,10 @@ func TestServerMode_HappyPath(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/dispatches" {
+		if r.URL.Path != testDispatchEndpoint {
 			http.NotFound(w, r)
 			return
 		}
@@ -30,7 +30,7 @@ func TestServerMode_HappyPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		repo, ok := body["repo"].(string)
-		if !ok || repo != "entireio/cli" {
+		if !ok || repo != testRepoFullName {
 			t.Fatalf("unexpected repo payload: %v", body)
 		}
 		if _, ok := body["repos"]; ok {
@@ -50,7 +50,7 @@ func TestServerMode_HappyPath(t *testing.T) {
 				"normalized_since": "2026-04-09T00:00:00Z",
 				"normalized_until": "2026-04-16T00:00:00Z",
 			},
-			"covered_repos": []string{"entireio/cli"},
+			"covered_repos": []string{testRepoFullName},
 			"repos":         []any{},
 			"totals": map[string]any{
 				"checkpoints":           0,
@@ -74,7 +74,7 @@ func TestServerMode_HappyPath(t *testing.T) {
 
 	oldLookup := lookupCurrentToken
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return "test-token", nil }
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() {
 		lookupCurrentToken = oldLookup
@@ -101,7 +101,7 @@ func TestServerMode_HappyPath(t *testing.T) {
 
 func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/dispatches" {
+		if r.URL.Path != testDispatchEndpoint {
 			http.NotFound(w, r)
 			return
 		}
@@ -111,7 +111,7 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 			t.Fatal(err)
 		}
 		repos, ok := body["repo"].([]any)
-		if !ok || len(repos) != 2 || repos[0] != "entireio/cli" || repos[1] != "entireio/entire.io" {
+		if !ok || len(repos) != 2 || repos[0] != testRepoFullName || repos[1] != "entireio/entire.io" {
 			t.Fatalf("unexpected repo payload: %v", body)
 		}
 		if _, ok := body["repos"]; ok {
@@ -125,7 +125,7 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 				"normalized_since": "2026-04-09T00:00:00Z",
 				"normalized_until": "2026-04-16T00:00:00Z",
 			},
-			"covered_repos":      []string{"entireio/cli", "entireio/entire.io"},
+			"covered_repos":      []string{testRepoFullName, "entireio/entire.io"},
 			"repos":              []any{},
 			"generated_markdown": "Hello",
 			"totals": map[string]any{
@@ -149,7 +149,7 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 
 	oldLookup := lookupCurrentToken
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return "test-token", nil }
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() {
 		lookupCurrentToken = oldLookup
@@ -160,7 +160,7 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 
 	got, err := Run(context.Background(), Options{
 		Mode:      ModeServer,
-		RepoPaths: []string{"entireio/cli", "entireio/entire.io"},
+		RepoPaths: []string{testRepoFullName, "entireio/entire.io"},
 		Since:     "7d",
 	})
 	if err != nil {
@@ -180,10 +180,10 @@ func TestServerMode_RequiresGeneratedMarkdown(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/dispatches" {
+		if r.URL.Path != testDispatchEndpoint {
 			http.NotFound(w, r)
 			return
 		}
@@ -195,7 +195,7 @@ func TestServerMode_RequiresGeneratedMarkdown(t *testing.T) {
 				"normalized_since": "2026-04-09T00:00:00Z",
 				"normalized_until": "2026-04-16T00:00:00Z",
 			},
-			"covered_repos": []string{"entireio/cli"},
+			"covered_repos": []string{testRepoFullName},
 			"repos":         []any{},
 			"totals": map[string]any{
 				"checkpoints":           0,
@@ -218,7 +218,7 @@ func TestServerMode_RequiresGeneratedMarkdown(t *testing.T) {
 
 	oldLookup := lookupCurrentToken
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return "test-token", nil }
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() {
 		lookupCurrentToken = oldLookup

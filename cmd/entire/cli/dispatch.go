@@ -15,7 +15,7 @@ import (
 
 var runDispatch = dispatchpkg.Run
 var renderDispatchMarkdown = dispatchpkg.RenderMarkdown
-var dispatchTerminalMode = func(w io.Writer) bool { return isTerminalWriter(w) }
+var dispatchTerminalMode = isTerminalWriter
 var runInteractiveDispatch = defaultRunInteractiveDispatch
 var renderTerminalMarkdown = defaultRenderTerminalMarkdown
 
@@ -89,20 +89,24 @@ func runDispatchCommand(ctx context.Context, outW io.Writer, opts dispatchpkg.Op
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprint(outW, rendered)
-		return err
+		if _, err := fmt.Fprint(outW, rendered); err != nil {
+			return fmt.Errorf("write dispatch output: %w", err)
+		}
+		return nil
 	}
 
 	result, err := runDispatch(ctx, opts)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprint(outW, renderDispatchMarkdown(result))
-	return err
+	if _, err := fmt.Fprint(outW, renderDispatchMarkdown(result)); err != nil {
+		return fmt.Errorf("write dispatch output: %w", err)
+	}
+	return nil
 }
 
 func isTerminalStdin(file *os.File) bool {
-	return term.IsTerminal(int(file.Fd()))
+	return term.IsTerminal(int(file.Fd())) //nolint:gosec // G115: uintptr->int is safe for fd
 }
 
 func shouldRunDispatchWizard(flagCount int, stdinIsTerminal bool, stdoutIsTerminal bool) bool {
@@ -161,19 +165,17 @@ func resolveDispatchOptions(
 	var branches []string
 	allBranches := flagAllBranches
 	implicitCurrentBranch := false
-	if !allBranches {
-		if len(flagRepos) > 0 {
-			branches = nil
-		} else if strings.TrimSpace(flagOrg) != "" {
-			branches = nil
-		} else {
-			currentBranchName, branchErr := currentBranch()
-			if branchErr != nil {
-				return dispatchpkg.Options{}, branchErr
-			}
-			branches = []string{currentBranchName}
-			implicitCurrentBranch = true
+	switch {
+	case allBranches:
+	case len(flagRepos) > 0, strings.TrimSpace(flagOrg) != "":
+		branches = nil
+	default:
+		currentBranchName, branchErr := currentBranch()
+		if branchErr != nil {
+			return dispatchpkg.Options{}, branchErr
 		}
+		branches = []string{currentBranchName}
+		implicitCurrentBranch = true
 	}
 
 	return dispatchpkg.Options{

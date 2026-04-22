@@ -100,7 +100,7 @@ type APIBullet struct {
 
 func (c *CloudClient) CreateDispatch(ctx context.Context, reqBody CreateDispatchRequest) (*CreateDispatchResponse, error) {
 	var out CreateDispatchResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/dispatches", reqBody, &out); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/dispatch", reqBody, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -138,7 +138,7 @@ func (c *CloudClient) doJSON(ctx context.Context, method, path string, reqBody, 
 		return errors.New("dispatch requires login — run `entire login`")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) //nolint:errcheck // best-effort body read for error message
 		trimmed := strings.TrimSpace(string(body))
 		if trimmed == "" {
 			return fmt.Errorf("%s %s: unexpected status %d", method, path, resp.StatusCode)

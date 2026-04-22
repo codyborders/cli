@@ -40,7 +40,8 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 
 	var repoScope any
 	repoFullNames := append([]string(nil), opts.RepoPaths...)
-	if opts.Org == "" && len(repoFullNames) == 0 {
+	switch {
+	case opts.Org == "" && len(repoFullNames) == 0:
 		repoRoot, err := paths.WorktreeRoot(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("not in a git repository: %w", err)
@@ -54,9 +55,9 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 			return nil, err
 		}
 		repoScope = repoFullName
-	} else if len(repoFullNames) == 1 {
+	case len(repoFullNames) == 1:
 		repoScope = repoFullNames[0]
-	} else if len(repoFullNames) > 1 {
+	case len(repoFullNames) > 1:
 		repoScope = repoFullNames
 	}
 

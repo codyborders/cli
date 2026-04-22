@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"context"
-	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/huh"
 	dispatchpkg "github.com/entireio/cli/cmd/entire/cli/dispatch"
-	"github.com/entireio/cli/cmd/entire/cli/testutil"
 )
 
 func TestNewDispatchWizardState_Defaults(t *testing.T) {
@@ -27,7 +24,7 @@ func TestNewDispatchWizardState_Defaults(t *testing.T) {
 	if state.branchMode != dispatchWizardBranchCurrent {
 		t.Fatalf("expected current-branch mode default, got %q", state.branchMode)
 	}
-	if state.voicePreset != "neutral" {
+	if state.voicePreset != testDispatchVoicePresetNeutral {
 		t.Fatalf("expected neutral voice preset default, got %q", state.voicePreset)
 	}
 	if state.voiceCustom != "" {
@@ -46,11 +43,7 @@ func TestDispatchWizardState_ResolveOrgDefaultsToDefaultBranches(t *testing.T) {
 	state.scopeType = dispatchWizardScopeOrganization
 	state.selectedOrg = "entireio"
 
-	opts, err := state.resolve(dispatchWizardChoices{
-		orgOptions: []huh.Option[string]{
-			huh.NewOption("entireio", "entireio"),
-		},
-	}, func() (string, error) { return "feature/preview", nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +61,7 @@ func TestDispatchWizardState_ResolveAllBranches(t *testing.T) {
 	state := newDispatchWizardState()
 	state.branchMode = dispatchWizardBranchAll
 
-	opts, err := state.resolve(dispatchWizardChoices{}, func() (string, error) { return "feature/preview", nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,65 +70,49 @@ func TestDispatchWizardState_ResolveAllBranches(t *testing.T) {
 	}
 }
 
-func TestDispatchWizardChoices_LocalBranchModes(t *testing.T) {
+func TestDispatchWizardState_LocalBranchModes(t *testing.T) {
 	t.Parallel()
 
-	values := optionValues(dispatchWizardChoices{}.branchModeOptions(newDispatchWizardState()))
+	values := optionValues(newDispatchWizardState().branchModeOptions())
 	if got := strings.Join(values, ","); got != dispatchWizardBranchCurrent+","+dispatchWizardBranchAll {
 		t.Fatalf("unexpected local branch modes: %v", values)
 	}
 }
 
-func TestDispatchWizardChoices_ServerBranchModes(t *testing.T) {
+func TestDispatchWizardState_ServerBranchModes(t *testing.T) {
 	t.Parallel()
 
 	state := newDispatchWizardState()
 	state.modeChoice = dispatchWizardModeServer
 
-	values := optionValues(dispatchWizardChoices{}.branchModeOptions(state))
+	values := optionValues(state.branchModeOptions())
 	if got := strings.Join(values, ","); got != dispatchWizardBranchDefault+","+dispatchWizardBranchAll {
 		t.Fatalf("unexpected server branch modes: %v", values)
 	}
 }
 
-func TestDispatchWizardChoices_ScopeOptionsAdaptByMode(t *testing.T) {
+func TestDispatchWizardState_ScopeOptionsAdaptByMode(t *testing.T) {
 	t.Parallel()
 
-	choices := dispatchWizardChoices{
-		repoOptions: []huh.Option[string]{
-			huh.NewOption("entireio/cli", "entireio/cli"),
-			huh.NewOption("entireio/entire.io", "entireio/entire.io"),
-		},
-		orgOptions: []huh.Option[string]{
-			huh.NewOption("entireio", "entireio"),
-		},
-	}
-
 	state := newDispatchWizardState()
-	localScopeValues := optionValues(choices.scopeOptions(state))
+	localScopeValues := optionValues(state.scopeOptions())
 	if got := strings.Join(localScopeValues, ","); got != dispatchWizardScopeCurrentRepo {
 		t.Fatalf("unexpected local scope options: %v", localScopeValues)
 	}
 
 	state.modeChoice = dispatchWizardModeServer
-	serverScopeValues := optionValues(choices.scopeOptions(state))
+	serverScopeValues := optionValues(state.scopeOptions())
 	if got := strings.Join(serverScopeValues, ","); got != dispatchWizardScopeSelectedRepos+","+dispatchWizardScopeOrganization {
 		t.Fatalf("unexpected server scope options: %v", serverScopeValues)
 	}
 }
 
-func TestDispatchWizardChoices_ServerRepoOptionsUseFullSlugLabels(t *testing.T) {
+func TestBuildDispatchRepoOptions_UsesFullSlugLabels(t *testing.T) {
 	t.Parallel()
 
-	choices := dispatchWizardChoices{
-		repoOptions: []huh.Option[string]{
-			huh.NewOption("entireio/cli", "entireio/cli"),
-			huh.NewOption("entireio/entire.io", "entireio/entire.io"),
-		},
-	}
-
-	if got := strings.Join(optionKeys(choices.repoOptions), ","); got != "entireio/cli,entireio/entire.io" {
-		t.Fatalf("expected repo options to use org/repo labels, got %q", got)
+	options := buildDispatchRepoOptions([]string{"entireio/entire.io", "entireio/cli"})
+	if got := strings.Join(optionKeys(options), ","); got != "entireio/cli,entireio/entire.io" {
+		t.Fatalf("expected repo options to use org/repo labels sorted, got %q", got)
 	}
 }
 
@@ -147,19 +124,11 @@ func TestDispatchWizardState_ServerModeKeepsSelectedReposScope(t *testing.T) {
 	state.scopeType = dispatchWizardScopeSelectedRepos
 	state.selectedRepos = []string{"entireio/cli"}
 
-	if got := state.effectiveScopeType(dispatchWizardChoices{
-		repoOptions: []huh.Option[string]{
-			huh.NewOption("entireio/cli", "entireio/cli"),
-		},
-	}); got != dispatchWizardScopeSelectedRepos {
+	if got := state.effectiveScopeType(); got != dispatchWizardScopeSelectedRepos {
 		t.Fatalf("expected server mode to keep selected repos scope, got %q", got)
 	}
 
-	opts, err := state.resolve(dispatchWizardChoices{
-		repoOptions: []huh.Option[string]{
-			huh.NewOption("entireio/cli", "entireio/cli"),
-		},
-	}, func() (string, error) { return "feature/preview", nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatalf("expected server mode to resolve selected repos, got %v", err)
 	}
@@ -172,14 +141,13 @@ func TestDispatchWizardState_ShowsRepoPickerOnlyForSelectedRepos(t *testing.T) {
 	t.Parallel()
 
 	state := newDispatchWizardState()
-	choices := dispatchWizardChoices{}
-	if state.showRepoPicker(choices) {
+	if state.showRepoPicker() {
 		t.Fatal("did not expect repo picker in local mode")
 	}
 
 	state.modeChoice = dispatchWizardModeServer
 	state.scopeType = dispatchWizardScopeSelectedRepos
-	if !state.showRepoPicker(choices) {
+	if !state.showRepoPicker() {
 		t.Fatal("expected repo picker for selected repos scope in server mode")
 	}
 }
@@ -188,21 +156,17 @@ func TestDispatchWizardState_ShowsOrganizationPickerOnlyForOrgScope(t *testing.T
 	t.Parallel()
 
 	state := newDispatchWizardState()
-	if state.showOrganizationPicker(dispatchWizardChoices{}) {
+	if state.showOrganizationPicker() {
 		t.Fatal("did not expect organization picker in local mode")
 	}
 
 	state.modeChoice = dispatchWizardModeServer
-	if state.showOrganizationPicker(dispatchWizardChoices{}) {
+	if state.showOrganizationPicker() {
 		t.Fatal("did not expect organization picker for current repo server scope")
 	}
 
 	state.scopeType = dispatchWizardScopeOrganization
-	if !state.showOrganizationPicker(dispatchWizardChoices{
-		orgOptions: []huh.Option[string]{
-			huh.NewOption("entireio", "entireio"),
-		},
-	}) {
+	if !state.showOrganizationPicker() {
 		t.Fatal("expected organization picker for organization scope")
 	}
 }
@@ -211,26 +175,26 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 	t.Parallel()
 
 	state := newDispatchWizardState()
-	state.voicePreset = "marvin"
-	opts, err := state.resolve(dispatchWizardChoices{}, func() (string, error) { return "feature/preview", nil })
+	state.voicePreset = testDispatchVoicePresetMarvin
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Voice != "marvin" {
+	if opts.Voice != testDispatchVoicePresetMarvin {
 		t.Fatalf("expected marvin voice, got %q", opts.Voice)
 	}
 
-	state.voicePreset = "neutral"
-	opts, err = state.resolve(dispatchWizardChoices{}, func() (string, error) { return "feature/preview", nil })
+	state.voicePreset = testDispatchVoicePresetNeutral
+	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Voice != "neutral" {
+	if opts.Voice != testDispatchVoicePresetNeutral {
 		t.Fatalf("expected neutral voice, got %q", opts.Voice)
 	}
-	state.voicePreset = "custom"
+	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "dry, skeptical release note narrator"
-	opts, err = state.resolve(dispatchWizardChoices{}, func() (string, error) { return "feature/preview", nil })
+	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,14 +207,14 @@ func TestDispatchWizardState_ResolveEmptyVoiceDefaultsToNeutral(t *testing.T) {
 	t.Parallel()
 
 	state := newDispatchWizardState()
-	state.voicePreset = "custom"
+	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "   "
 
-	opts, err := state.resolve(dispatchWizardChoices{}, func() (string, error) { return "feature/preview", nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Voice != "neutral" {
+	if opts.Voice != testDispatchVoicePresetNeutral {
 		t.Fatalf("expected neutral voice fallback, got %q", opts.Voice)
 	}
 }
@@ -263,7 +227,7 @@ func TestDispatchWizardState_ShowsCustomVoiceInputOnlyForCustomPreset(t *testing
 		t.Fatal("did not expect custom voice input for default preset")
 	}
 
-	state.voicePreset = "custom"
+	state.voicePreset = testDispatchVoicePresetCustom
 	if !state.showCustomVoiceInput() {
 		t.Fatal("expected custom voice input for custom preset")
 	}
@@ -305,7 +269,7 @@ func TestBuildDispatchCommand(t *testing.T) {
 		Mode:        dispatchpkg.ModeServer,
 		Since:       "7d",
 		Branches:    nil,
-		Voice:       "marvin",
+		Voice:       testDispatchVoicePresetMarvin,
 		RepoPaths:   []string{"entireio/cli"},
 		AllBranches: false,
 	})
@@ -341,7 +305,7 @@ func TestBuildDispatchCommand_AllBranches(t *testing.T) {
 	command := buildDispatchCommand(dispatchpkg.Options{
 		Mode:        dispatchpkg.ModeServer,
 		Since:       "7d",
-		Voice:       "marvin",
+		Voice:       testDispatchVoicePresetMarvin,
 		RepoPaths:   []string{"entireio/cli"},
 		AllBranches: true,
 	})
@@ -350,62 +314,21 @@ func TestBuildDispatchCommand_AllBranches(t *testing.T) {
 	}
 }
 
-func TestDiscoverDispatchWizardChoices_UsesAuthenticatedOrgs(t *testing.T) {
-	dir := t.TempDir()
-	testutil.InitRepo(t, dir)
-	testutil.WriteFile(t, dir, "a.txt", "x")
-	testutil.GitAdd(t, dir, "a.txt")
-	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+func TestBuildDispatchOrgOptions_SortsNames(t *testing.T) {
+	t.Parallel()
 
-	oldList := listDispatchWizardOrgs
-	listDispatchWizardOrgs = func(context.Context) ([]string, error) {
-		return []string{"beta", "alpha"}, nil
-	}
-	t.Cleanup(func() {
-		listDispatchWizardOrgs = oldList
-	})
-
-	t.Chdir(dir)
-
-	choices, err := discoverDispatchWizardChoices(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(optionValues(choices.orgOptions), ","); got != "alpha,beta" {
-		t.Fatalf("unexpected org options: %v", optionValues(choices.orgOptions))
+	options := buildDispatchOrgOptions([]string{"beta", "alpha"})
+	if got := strings.Join(optionValues(options), ","); got != "alpha,beta" {
+		t.Fatalf("unexpected org options: %v", optionValues(options))
 	}
 }
 
-func TestDiscoverDispatchWizardChoices_UsesAuthenticatedRepos(t *testing.T) {
-	dir := t.TempDir()
-	testutil.InitRepo(t, dir)
-	testutil.WriteFile(t, dir, "a.txt", "x")
-	testutil.GitAdd(t, dir, "a.txt")
-	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+func TestBuildDispatchRepoOptions_DedupesAndSorts(t *testing.T) {
+	t.Parallel()
 
-	oldListRepos := listDispatchWizardRepos
-	oldListOrgs := listDispatchWizardOrgs
-	listDispatchWizardRepos = func(context.Context) ([]string, error) {
-		return []string{"entireio/entire.io", "entireio/cli", "entireio/cli"}, nil
-	}
-	listDispatchWizardOrgs = func(context.Context) ([]string, error) {
-		return nil, nil
-	}
-	t.Cleanup(func() {
-		listDispatchWizardRepos = oldListRepos
-		listDispatchWizardOrgs = oldListOrgs
-	})
-
-	t.Chdir(dir)
-
-	choices, err := discoverDispatchWizardChoices(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(optionValues(choices.repoOptions), ","); got != "entireio/cli,entireio/entire.io" {
-		t.Fatalf("unexpected repo options: %v", optionValues(choices.repoOptions))
+	options := buildDispatchRepoOptions([]string{"entireio/entire.io", "entireio/cli", "entireio/cli"})
+	if got := strings.Join(optionValues(options), ","); got != "entireio/cli,entireio/entire.io" {
+		t.Fatalf("unexpected repo options: %v", optionValues(options))
 	}
 }
 
@@ -415,30 +338,6 @@ func optionValues(options []huh.Option[string]) []string {
 		values = append(values, option.Value)
 	}
 	return values
-}
-
-func currentTestBranchName(t *testing.T, repoDir string) string {
-	t.Helper()
-
-	cmd := exec.Command("git", "branch", "--show-current") //nolint:noctx // test helper
-	cmd.Dir = repoDir
-	cmd.Env = testutil.GitIsolatedEnv()
-	output, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("failed to detect current branch: %v", err)
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func addOriginRemote(t *testing.T, repoDir, remoteURL string) {
-	t.Helper()
-
-	cmd := exec.Command("git", "remote", "add", "origin", remoteURL) //nolint:noctx // test helper
-	cmd.Dir = repoDir
-	cmd.Env = testutil.GitIsolatedEnv()
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to add origin remote: %v\nOutput: %s", err, output)
-	}
 }
 
 func optionKeys(options []huh.Option[string]) []string {

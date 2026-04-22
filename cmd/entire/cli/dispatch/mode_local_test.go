@@ -23,15 +23,15 @@ func TestLocalMode_EnumeratesCheckpoints(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	createdAt := time.Now().UTC()
 	seedCommittedCheckpoint(t, dir, seededCheckpoint{
-		id:           "a1b2c3d4e5f6",
+		id:           testCheckpointID,
 		branch:       "main",
 		createdAt:    createdAt,
 		filesTouched: []string{"a.txt"},
-		outcome:      "local fallback summary",
+		outcome:      testLocalFallbackText,
 	})
 
 	oldNow := nowUTC
@@ -53,13 +53,13 @@ func TestLocalMode_EnumeratesCheckpoints(t *testing.T) {
 	if len(got.Repos) != 1 {
 		t.Fatalf("expected 1 repo group, got %d", len(got.Repos))
 	}
-	if got.Repos[0].FullName != "entireio/cli" {
+	if got.Repos[0].FullName != testRepoFullName {
 		t.Fatalf("unexpected repo group: %+v", got.Repos[0])
 	}
-	if got.Repos[0].Sections[0].Bullets[0].Text != "local fallback summary" {
+	if got.Repos[0].Sections[0].Bullets[0].Text != testLocalFallbackText {
 		t.Fatalf("unexpected bullet: %+v", got.Repos[0].Sections[0].Bullets[0])
 	}
-	if len(got.CoveredRepos) != 1 || got.CoveredRepos[0] != "entireio/cli" {
+	if len(got.CoveredRepos) != 1 || got.CoveredRepos[0] != testRepoFullName {
 		t.Fatalf("unexpected covered repos: %v", got.CoveredRepos)
 	}
 }
@@ -71,15 +71,15 @@ func TestLocalMode_UsesUntilWindow(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	now := time.Now().UTC()
 	seedCommittedCheckpoint(t, dir, seededCheckpoint{
-		id:           "a1b2c3d4e5f6",
+		id:           testCheckpointID,
 		branch:       "main",
 		createdAt:    now,
 		filesTouched: []string{"a.txt"},
-		outcome:      "local fallback summary",
+		outcome:      testLocalFallbackText,
 	})
 
 	oldNow := nowUTC
@@ -124,10 +124,10 @@ func TestLocalMode_FallsBackToCommitSubjectWhenSummaryMissing(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	now := time.Now().UTC()
-	cpID := "a1b2c3d4e5f6"
+	cpID := testCheckpointID
 	testutil.WriteFile(t, dir, "plans.md", "ship it")
 	testutil.GitAdd(t, dir, "plans.md")
 	commitWithMessage(t, dir, trailers.FormatCheckpoint("ship the thing", mustCheckpointID(t, cpID)))
@@ -169,15 +169,15 @@ func TestLocalMode_GenerateProducesInlineText(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	createdAt := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	seedCommittedCheckpoint(t, dir, seededCheckpoint{
-		id:           "a1b2c3d4e5f6",
+		id:           testCheckpointID,
 		branch:       "main",
 		createdAt:    createdAt,
 		filesTouched: []string{"a.txt"},
-		outcome:      "local fallback summary",
+		outcome:      testLocalFallbackText,
 	})
 
 	oldNow := nowUTC
@@ -213,15 +213,15 @@ func TestLocalMode_FailsWhenGeneratedMarkdownIsEmpty(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	createdAt := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	seedCommittedCheckpoint(t, dir, seededCheckpoint{
-		id:           "a1b2c3d4e5f6",
+		id:           testCheckpointID,
 		branch:       "main",
 		createdAt:    createdAt,
 		filesTouched: []string{"a.txt"},
-		outcome:      "local fallback summary",
+		outcome:      testLocalFallbackText,
 	})
 
 	oldNow := nowUTC
@@ -257,9 +257,9 @@ func TestLocalMode_ImplicitCurrentBranchUsesHEADReachability(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
-	cpID := "a1b2c3d4e5f6"
+	cpID := testCheckpointID
 	testutil.GitCheckoutNewBranch(t, dir, "entire-dispatch")
 	testutil.WriteFile(t, dir, "plans.md", "dispatch plan")
 	testutil.GitAdd(t, dir, "plans.md")
@@ -285,7 +285,7 @@ func TestLocalMode_ImplicitCurrentBranchUsesHEADReachability(t *testing.T) {
 		CheckpointsCount: 1,
 		Agent:            agent.AgentTypeClaudeCode,
 		Summary: &checkpoint.Summary{
-			Outcome: "local fallback summary",
+			Outcome: testLocalFallbackText,
 		},
 		AuthorName:  "Test User",
 		AuthorEmail: "test@example.com",
@@ -313,7 +313,7 @@ func TestLocalMode_ImplicitCurrentBranchUsesHEADReachability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Repos) != 1 || got.Repos[0].Sections[0].Bullets[0].Text != "local fallback summary" {
+	if len(got.Repos) != 1 || got.Repos[0].Sections[0].Bullets[0].Text != testLocalFallbackText {
 		t.Fatalf("unexpected dispatch payload: %+v", got)
 	}
 }
@@ -325,9 +325,9 @@ func TestLocalMode_ExplicitBranchesRemainExact(t *testing.T) {
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
-	cpID := "a1b2c3d4e5f6"
+	cpID := testCheckpointID
 	testutil.GitCheckoutNewBranch(t, dir, "entire-dispatch")
 	testutil.WriteFile(t, dir, "plans.md", "dispatch plan")
 	testutil.GitAdd(t, dir, "plans.md")
@@ -352,7 +352,7 @@ func TestLocalMode_ExplicitBranchesRemainExact(t *testing.T) {
 		CheckpointsCount: 1,
 		Agent:            agent.AgentTypeClaudeCode,
 		Summary: &checkpoint.Summary{
-			Outcome: "local fallback summary",
+			Outcome: testLocalFallbackText,
 		},
 		AuthorName:  "Test User",
 		AuthorEmail: "test@example.com",
@@ -391,17 +391,17 @@ func TestLocalMode_ImplicitCurrentBranchUsesCheckpointBranchWithoutTrailerReacha
 	testutil.WriteFile(t, dir, "a.txt", "x")
 	testutil.GitAdd(t, dir, "a.txt")
 	testutil.GitCommit(t, dir, "initial")
-	addOriginRemote(t, dir, "https://github.com/entireio/cli.git")
+	addOriginRemote(t, dir)
 
 	testutil.GitCheckoutNewBranch(t, dir, "entire-dispatch-codex")
 
 	createdAt := time.Now().UTC()
 	seedCommittedCheckpoint(t, dir, seededCheckpoint{
-		id:           "a1b2c3d4e5f6",
+		id:           testCheckpointID,
 		branch:       "entire-dispatch-codex",
 		createdAt:    createdAt,
 		filesTouched: []string{"a.txt"},
-		outcome:      "local fallback summary",
+		outcome:      testLocalFallbackText,
 	})
 
 	oldNow := nowUTC
@@ -421,7 +421,7 @@ func TestLocalMode_ImplicitCurrentBranchUsesCheckpointBranchWithoutTrailerReacha
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Repos) != 1 || got.Repos[0].Sections[0].Bullets[0].Text != "local fallback summary" {
+	if len(got.Repos) != 1 || got.Repos[0].Sections[0].Bullets[0].Text != testLocalFallbackText {
 		t.Fatalf("unexpected dispatch payload: %+v", got)
 	}
 }
@@ -516,7 +516,7 @@ func seedCommittedCheckpoint(t *testing.T, repoDir string, cp seededCheckpoint) 
 	}
 }
 
-func addOriginRemote(t *testing.T, repoDir, remoteURL string) {
+func addOriginRemote(t *testing.T, repoDir string) {
 	t.Helper()
 
 	repo, err := git.PlainOpenWithOptions(repoDir, &git.PlainOpenOptions{DetectDotGit: true})
@@ -525,7 +525,7 @@ func addOriginRemote(t *testing.T, repoDir, remoteURL string) {
 	}
 	_, err = repo.CreateRemote(&config.RemoteConfig{
 		Name: "origin",
-		URLs: []string{remoteURL},
+		URLs: []string{testRepoRemoteURL},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -210,7 +210,7 @@ func TestNewDispatchCmd_NonTerminalPrintsPlainMarkdown(t *testing.T) {
 		if dispatch.GeneratedText != "generated dispatch" {
 			t.Fatalf("unexpected dispatch: %+v", dispatch)
 		}
-		return "# generated dispatch\n"
+		return testDispatchGeneratedMarkdown
 	}
 	t.Cleanup(func() {
 		runDispatch = oldRunDispatch
@@ -229,7 +229,7 @@ func TestNewDispatchCmd_NonTerminalPrintsPlainMarkdown(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); got != "# generated dispatch\n" {
+	if got := stdout.String(); got != testDispatchGeneratedMarkdown {
 		t.Fatalf("unexpected stdout: %q", got)
 	}
 	if got := stderr.String(); got != "" {
@@ -243,10 +243,10 @@ func TestNewDispatchCmd_TerminalUsesInteractiveRenderer(t *testing.T) {
 	oldGlow := renderTerminalMarkdown
 	dispatchTerminalMode = func(_ io.Writer) bool { return true }
 	runInteractiveDispatch = func(_ context.Context, _ io.Writer, _ dispatchpkg.Options) (string, error) {
-		return "# generated dispatch\n", nil
+		return testDispatchGeneratedMarkdown, nil
 	}
 	renderTerminalMarkdown = func(_ io.Writer, markdown string) (string, error) {
-		if markdown != "# generated dispatch\n" {
+		if markdown != testDispatchGeneratedMarkdown {
 			t.Fatalf("unexpected markdown: %q", markdown)
 		}
 		return "glow output\n", nil

@@ -72,7 +72,7 @@ func defaultRunInteractiveDispatch(ctx context.Context, outW io.Writer, opts dis
 	program := newDispatchProgram(model, outW, false)
 	finalModel, err := program.Run()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("run dispatch tui: %w", err)
 	}
 
 	finished, ok := finalModel.(dispatchStatusModel)
@@ -132,9 +132,7 @@ func newDispatchStatusModel(
 
 func newDispatchStatusStyles(ss statusStyles) dispatchStatusStyles {
 	styles := dispatchStatusStyles{
-		card: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(1, 2),
+		card:     lipgloss.NewStyle(),
 		title:    lipgloss.NewStyle().Bold(true),
 		subtitle: lipgloss.NewStyle(),
 		detail:   lipgloss.NewStyle(),
@@ -145,7 +143,6 @@ func newDispatchStatusStyles(ss statusStyles) dispatchStatusStyles {
 		return styles
 	}
 
-	styles.card = styles.card.BorderForeground(lipgloss.Color("240"))
 	styles.title = styles.title.Foreground(lipgloss.Color("214"))
 	styles.subtitle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	styles.detail = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -164,13 +161,14 @@ func dispatchStatusDetails(opts dispatchpkg.Options) []string {
 	}
 
 	branches := "Branches: current branch"
-	if opts.AllBranches {
+	switch {
+	case opts.AllBranches:
 		branches = "Branches: all"
-	} else if opts.Mode == dispatchpkg.ModeLocal {
+	case opts.Mode == dispatchpkg.ModeLocal:
 		branches = "Branches: current branch"
-	} else if len(opts.Branches) > 0 {
+	case len(opts.Branches) > 0:
 		branches = "Branches: " + strings.Join(opts.Branches, ", ")
-	} else if strings.TrimSpace(opts.Org) != "" || len(opts.RepoPaths) > 0 {
+	case strings.TrimSpace(opts.Org) != "" || len(opts.RepoPaths) > 0:
 		branches = "Branches: default branches"
 	}
 
@@ -186,6 +184,7 @@ func (m dispatchStatusModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.runDispatch())
 }
 
+//nolint:ireturn // tea.Model interface contract
 func (m dispatchStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -238,7 +237,7 @@ func (m dispatchStatusModel) runDispatch() tea.Cmd {
 func clearDispatchInlineView(w io.Writer, view string) {
 	lineCount := renderedLineCount(view)
 	for range lineCount {
-		_, _ = io.WriteString(w, "\x1b[1A\x1b[2K\r")
+		_, _ = io.WriteString(w, "\x1b[1A\x1b[2K\r") //nolint:errcheck // terminal escape sequence, ignore write errors
 	}
 }
 

@@ -69,7 +69,7 @@ func runLocal(ctx context.Context, opts Options) (*Dispatch, error) {
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("enumerate repo candidates: %w", err)
 	}
 
 	fallback := applyFallbackChain(allCandidates)
@@ -196,7 +196,7 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 			}
 		}
 
-		commitSubject, _ := findCommitSubjectByCheckpoint(ctx, repoRoot, info.CheckpointID)
+		commitSubject, _ := findCommitSubjectByCheckpoint(ctx, repoRoot, info.CheckpointID) //nolint:errcheck // missing subject falls through to other fallbacks
 		candidates = append(candidates, candidate{
 			CheckpointID:      info.CheckpointID.String(),
 			RepoFullName:      repoFullName,
@@ -237,7 +237,7 @@ func resolveRepoFullName(repo *git.Repository) (string, error) {
 
 	owner, repoName, err := search.ParseGitHubRemote(remote.Config().URLs[0])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse github remote: %w", err)
 	}
 	return owner + "/" + repoName, nil
 }
@@ -257,7 +257,7 @@ func findCommitSubjectByCheckpoint(ctx context.Context, repoRoot string, checkpo
 	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "log", "--all", "--format=%s%x00", "--grep", "Entire-Checkpoint: "+checkpointID.String())
 	output, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git log --grep: %w", err)
 	}
 	parts := strings.SplitN(string(output), "\x00", 2)
 	if len(parts) == 0 {
