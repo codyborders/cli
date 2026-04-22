@@ -107,43 +107,26 @@ func (s dispatchWizardState) effectiveBranchMode() string {
 	return s.branchMode
 }
 
-func (s dispatchWizardState) selectedRepoPaths(availableRepos []string) []string {
+func (s dispatchWizardState) selectedReposList() []string {
+	return normalizeDispatchWizardSelections(s.selectedRepos)
+}
+
+func (s dispatchWizardState) selectedOrganizations() []string {
+	return normalizeDispatchWizardSelections(s.selectedOrgs)
+}
+
+func (s dispatchWizardState) resolveCloudScope() ([]string, []string, error) {
 	if s.isLocal() {
-		return nil
+		return nil, nil, nil
 	}
 
 	switch s.effectiveScopeType() {
 	case dispatchWizardScopeSelectedRepos:
-		return append([]string(nil), s.selectedRepos...)
+		return s.selectedReposList(), nil, nil
 	case dispatchWizardScopeOrganization:
-		if len(s.selectedOrgs) == 0 {
-			return nil
-		}
-		orgs := make(map[string]struct{}, len(s.selectedOrgs))
-		for _, org := range s.selectedOrgs {
-			org = strings.TrimSpace(org)
-			if org != "" {
-				orgs[org] = struct{}{}
-			}
-		}
-		if len(orgs) == 0 {
-			return nil
-		}
-
-		filtered := make([]string, 0, len(availableRepos))
-		for _, repo := range availableRepos {
-			owner, _, found := strings.Cut(repo, "/")
-			if !found {
-				continue
-			}
-			if _, ok := orgs[owner]; ok {
-				filtered = append(filtered, repo)
-			}
-		}
-		sort.Strings(filtered)
-		return filtered
+		return nil, s.selectedOrganizations(), nil
 	default:
-		return nil
+		return nil, nil, nil
 	}
 }
 
@@ -159,17 +142,26 @@ func (s dispatchWizardState) showOrganizationPicker() bool {
 	return !s.isLocal() && s.effectiveScopeType() == dispatchWizardScopeOrganization
 }
 
-func (s dispatchWizardState) resolve(availableRepos []string, currentBranch func() (string, error)) (dispatchpkg.Options, error) {
-	return resolveDispatchOptions(
+func (s dispatchWizardState) resolve(currentBranch func() (string, error)) (dispatchpkg.Options, error) {
+	repoPaths, orgs, err := s.resolveCloudScope()
+	if err != nil {
+		return dispatchpkg.Options{}, err
+	}
+
+	opts, err := resolveDispatchOptions(
 		s.isLocal(),
 		s.timeWindowPreset,
 		"",
 		s.effectiveBranchMode() == dispatchWizardBranchAll,
-		s.selectedRepoPaths(availableRepos),
-		"",
+		repoPaths,
+		orgs,
 		s.voiceValue(),
 		currentBranch,
 	)
+	if err != nil {
+		return dispatchpkg.Options{}, err
+	}
+	return opts, nil
 }
 
 func (s dispatchWizardState) scopeOptions() []huh.Option[string] {
@@ -195,13 +187,9 @@ func (s dispatchWizardState) branchModeOptions() []huh.Option[string] {
 	}
 }
 
-func buildDispatchWizardSummary(opts dispatchpkg.Options) string {
-	scope := "current repo"
-	switch {
-	case strings.TrimSpace(opts.Org) != "":
-		scope = "org:" + strings.TrimSpace(opts.Org)
-	case len(opts.RepoPaths) > 0:
-		scope = "repos:" + strings.Join(opts.RepoPaths, ", ")
+func buildDispatchWizardSummary(opts dispatchpkg.Options, scope string) string {
+	if strings.TrimSpace(scope) == "" {
+		scope = resolvedDispatchScope(opts)
 	}
 
 	branches := "current branch"
@@ -212,7 +200,7 @@ func buildDispatchWizardSummary(opts dispatchpkg.Options) string {
 		branches = "current branch"
 	case len(opts.Branches) > 0:
 		branches = strings.Join(opts.Branches, ", ")
-	case strings.TrimSpace(opts.Org) != "" || len(opts.RepoPaths) > 0:
+	case len(opts.Orgs) > 0 || len(opts.RepoPaths) > 0:
 		branches = "default branches"
 	}
 
@@ -228,6 +216,47 @@ func buildDispatchWizardSummary(opts dispatchpkg.Options) string {
 	}, "\n")
 }
 
+func resolvedDispatchScope(opts dispatchpkg.Options) string {
+	scope := "current repo"
+	switch {
+	case len(opts.Orgs) == 1:
+		scope = "org:" + opts.Orgs[0]
+	case len(opts.Orgs) > 1:
+		scope = "orgs:" + strings.Join(opts.Orgs, ", ")
+	case len(opts.RepoPaths) > 0:
+		scope = "repos:" + strings.Join(opts.RepoPaths, ", ")
+	}
+	return scope
+}
+
+func (s dispatchWizardState) previewScope(opts dispatchpkg.Options) string {
+	if s.isLocal() {
+		return resolvedDispatchScope(opts)
+	}
+
+	switch s.effectiveScopeType() {
+	case dispatchWizardScopeSelectedRepos:
+		selectedRepos := s.selectedReposList()
+		if len(selectedRepos) > 0 {
+			return "repos:" + strings.Join(selectedRepos, ", ")
+		}
+	case dispatchWizardScopeOrganization:
+		selectedOrgs := s.selectedOrganizations()
+		switch len(selectedOrgs) {
+		case 1:
+			return "org:" + selectedOrgs[0]
+		case 2, 3, 4, 5:
+			return "orgs:" + strings.Join(selectedOrgs, ", ")
+		default:
+			if len(selectedOrgs) > 0 {
+				return fmt.Sprintf("orgs:%s (%d)", strings.Join(selectedOrgs, ", "), len(selectedOrgs))
+			}
+		}
+	}
+
+	return resolvedDispatchScope(opts)
+}
+
 func buildDispatchCommand(opts dispatchpkg.Options) string {
 	return strings.Join(compactStrings([]string{
 		"entire dispatch",
@@ -235,7 +264,7 @@ func buildDispatchCommand(opts dispatchpkg.Options) string {
 		renderStringFlag("--since", strings.TrimSpace(opts.Since)),
 		mapBoolToFlag(opts.AllBranches, "--all-branches"),
 		renderStringFlag("--repos", strings.Join(opts.RepoPaths, ",")),
-		renderStringFlag("--org", strings.TrimSpace(opts.Org)),
+		renderStringFlag("--org", strings.Join(opts.Orgs, ",")),
 		renderStringFlag("--voice", strings.TrimSpace(opts.Voice)),
 	}), " ")
 }
@@ -303,16 +332,6 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 	go loadOrgs()
 
 	state := newDispatchWizardState()
-	availableCloudRepos := func() []string {
-		options := loadRepos()
-		repos := make([]string, 0, len(options))
-		for _, option := range options {
-			if option.Value != "" {
-				repos = append(repos, option.Value)
-			}
-		}
-		return repos
-	}
 	currentBranch := func() (string, error) {
 		return GetCurrentBranch(ctx)
 	}
@@ -345,7 +364,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 				OptionsFunc(loadRepos, nil).
 				Value(&state.selectedRepos).
 				Validate(func(value []string) error {
-					if state.effectiveScopeType() == dispatchWizardScopeSelectedRepos && len(value) == 0 {
+					if state.effectiveScopeType() == dispatchWizardScopeSelectedRepos && len(normalizeDispatchWizardSelections(value)) == 0 {
 						return errors.New("select at least one repo")
 					}
 					return nil
@@ -361,7 +380,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 				OptionsFunc(loadOrgs, nil).
 				Value(&state.selectedOrgs).
 				Validate(func(value []string) error {
-					if state.effectiveScopeType() == dispatchWizardScopeOrganization && len(value) == 0 {
+					if state.effectiveScopeType() == dispatchWizardScopeOrganization && len(normalizeDispatchWizardSelections(value)) == 0 {
 						return errors.New("select at least one organization")
 					}
 					return nil
@@ -415,16 +434,16 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 			huh.NewNote().
 				Title("Resolved options").
 				DescriptionFunc(func() string {
-					opts, resolveErr := state.resolve(availableCloudRepos(), currentBranch)
+					opts, resolveErr := state.resolve(currentBranch)
 					if resolveErr != nil {
 						return "Validation error: " + resolveErr.Error()
 					}
-					return buildDispatchWizardSummary(opts)
+					return buildDispatchWizardSummary(opts, state.previewScope(opts))
 				}, &state),
 			huh.NewNote().
 				Title("Command").
 				DescriptionFunc(func() string {
-					opts, resolveErr := state.resolve(availableCloudRepos(), currentBranch)
+					opts, resolveErr := state.resolve(currentBranch)
 					if resolveErr != nil {
 						return "Validation error: " + resolveErr.Error()
 					}
@@ -451,7 +470,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 		return dispatchpkg.Options{}, errDispatchCancelled
 	}
 
-	return state.resolve(availableCloudRepos(), currentBranch)
+	return state.resolve(currentBranch)
 }
 
 // newLazyOptions returns a func that runs loader once (under sync.Once) and
@@ -489,10 +508,36 @@ func buildDispatchRepoOptions(slugs []string) []huh.Option[string] {
 func buildDispatchOrgOptions(names []string) []huh.Option[string] {
 	sort.Strings(names)
 	options := make([]huh.Option[string], 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
 		options = append(options, huh.NewOption(name, name))
 	}
 	return options
+}
+
+func normalizeDispatchWizardSelections(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
 }
 
 func discoverLocalRepoRoots(ctx context.Context, currentRepo string) []string {

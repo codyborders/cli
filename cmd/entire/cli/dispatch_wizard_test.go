@@ -43,15 +43,33 @@ func TestDispatchWizardState_ResolveOrgDefaultsToDefaultBranches(t *testing.T) {
 	state.scopeType = dispatchWizardScopeOrganization
 	state.selectedOrgs = []string{"entireio"}
 
-	opts, err := state.resolve([]string{"entireio/cli", "entirehq/entire.io"}, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Orgs, ","); got != "entireio" {
+		t.Fatalf("expected single org selection to resolve to org scope, got %q", got)
+	}
+	if len(opts.RepoPaths) != 0 {
+		t.Fatalf("expected single org selection not to expand to repo paths, got %v", opts.RepoPaths)
 	}
 	if opts.AllBranches {
 		t.Fatal("did not expect org scope to default to all branches")
 	}
 	if opts.Branches != nil {
 		t.Fatalf("expected nil branches, got %v", opts.Branches)
+	}
+
+	state.selectedOrgs = []string{"entireio", "entirehq"}
+	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Orgs, ","); got != "entireio,entirehq" {
+		t.Fatalf("expected multi-org selection to resolve to org scope, got %q", got)
+	}
+	if len(opts.RepoPaths) != 0 {
+		t.Fatalf("expected multi-org selection not to expand to matching repos, got %v", opts.RepoPaths)
 	}
 }
 
@@ -61,7 +79,7 @@ func TestDispatchWizardState_ResolveAllBranches(t *testing.T) {
 	state := newDispatchWizardState()
 	state.branchMode = dispatchWizardBranchAll
 
-	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +146,7 @@ func TestDispatchWizardState_ServerModeKeepsSelectedReposScope(t *testing.T) {
 		t.Fatalf("expected server mode to keep selected repos scope, got %q", got)
 	}
 
-	opts, err := state.resolve([]string{"entireio/cli"}, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatalf("expected server mode to resolve selected repos, got %v", err)
 	}
@@ -176,7 +194,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 
 	state := newDispatchWizardState()
 	state.voicePreset = testDispatchVoicePresetMarvin
-	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +203,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 	}
 
 	state.voicePreset = testDispatchVoicePresetNeutral
-	opts, err = state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +212,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 	}
 	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "dry, skeptical release note narrator"
-	opts, err = state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +228,7 @@ func TestDispatchWizardState_ResolveEmptyVoiceDefaultsToNeutral(t *testing.T) {
 	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "   "
 
-	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +259,7 @@ func TestBuildDispatchWizardSummary(t *testing.T) {
 		RepoPaths:   []string{"/tmp/repo-a", "/tmp/repo-b"},
 		Branches:    nil,
 		AllBranches: false,
-	})
+	}, "")
 	if !strings.Contains(summary, "Mode: local") {
 		t.Fatalf("expected local mode in summary, got %q", summary)
 	}
@@ -256,7 +274,7 @@ func TestBuildDispatchWizardSummary(t *testing.T) {
 		Mode:        dispatchpkg.ModeServer,
 		RepoPaths:   []string{"entireio/cli"},
 		AllBranches: false,
-	})
+	}, "")
 	if !strings.Contains(summary, "Mode: cloud") {
 		t.Fatalf("expected cloud mode in summary, got %q", summary)
 	}

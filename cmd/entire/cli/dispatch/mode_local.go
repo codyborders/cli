@@ -26,7 +26,7 @@ var (
 )
 
 func runLocal(ctx context.Context, opts Options) (*Dispatch, error) {
-	if strings.TrimSpace(opts.Org) != "" {
+	if len(opts.Orgs) > 0 {
 		return nil, errors.New("--org cannot be used with --local")
 	}
 

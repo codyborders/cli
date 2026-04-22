@@ -336,8 +336,10 @@ func stringPtr(v string) *string {
 func dispatchStatusDetails(opts dispatchpkg.Options) []string {
 	scope := "Scope: current repo"
 	switch {
-	case strings.TrimSpace(opts.Org) != "":
-		scope = "Scope: org/" + strings.TrimSpace(opts.Org)
+	case len(opts.Orgs) == 1:
+		scope = "Scope: org/" + opts.Orgs[0]
+	case len(opts.Orgs) > 1:
+		scope = "Scope: orgs/" + strings.Join(opts.Orgs, ", ")
 	case len(opts.RepoPaths) > 0:
 		scope = "Scope: " + strings.Join(opts.RepoPaths, ", ")
 	}
@@ -350,7 +352,7 @@ func dispatchStatusDetails(opts dispatchpkg.Options) []string {
 		branches = "Branches: current branch"
 	case len(opts.Branches) > 0:
 		branches = "Branches: " + strings.Join(opts.Branches, ", ")
-	case strings.TrimSpace(opts.Org) != "" || len(opts.RepoPaths) > 0:
+	case len(opts.Orgs) > 0 || len(opts.RepoPaths) > 0:
 		branches = "Branches: default branches"
 	}
 

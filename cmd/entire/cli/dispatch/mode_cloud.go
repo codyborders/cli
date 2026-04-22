@@ -38,10 +38,10 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 		return nil, errors.New("--since must be before --until")
 	}
 
-	var repoScope any
-	repoFullNames := append([]string(nil), opts.RepoPaths...)
+	repos := append([]string(nil), opts.RepoPaths...)
+	orgs := append([]string(nil), opts.Orgs...)
 	switch {
-	case opts.Org == "" && len(repoFullNames) == 0:
+	case len(orgs) == 0 && len(repos) == 0:
 		repoRoot, err := paths.WorktreeRoot(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("not in a git repository: %w", err)
@@ -54,11 +54,7 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 		if err != nil {
 			return nil, err
 		}
-		repoScope = repoFullName
-	case len(repoFullNames) == 1:
-		repoScope = repoFullNames[0]
-	case len(repoFullNames) > 1:
-		repoScope = repoFullNames
+		repos = []string{repoFullName}
 	}
 
 	branches := any(opts.Branches)
@@ -68,8 +64,8 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 
 	cloud := NewCloudClient(CloudConfig{BaseURL: api.BaseURL(), Token: token})
 	reqBody := CreateDispatchRequest{
-		Repo:     repoScope,
-		Org:      opts.Org,
+		Repos:    repos,
+		Orgs:     orgs,
 		Since:    since.Format(time.RFC3339),
 		Until:    until.Format(time.RFC3339),
 		Branches: branches,

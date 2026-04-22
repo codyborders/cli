@@ -107,7 +107,7 @@ func TestLocalMode_UsesUntilWindow(t *testing.T) {
 func TestLocalMode_RejectsOrgScope(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode: ModeLocal,
-		Org:  "entireio",
+		Orgs: []string{"entireio"},
 	})
 	if err == nil {
 		t.Fatal("expected error")

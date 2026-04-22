@@ -14,8 +14,6 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/api"
 )
 
-const cloudTimeout = 30 * time.Second
-
 type CloudConfig struct {
 	BaseURL string
 	Token   string
@@ -35,16 +33,12 @@ func NewCloudClient(cfg CloudConfig) *CloudClient {
 		baseURL = api.BaseURL()
 	}
 
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = cloudTimeout
-	}
-
 	httpClient := cfg.HTTP
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: timeout}
-	} else if httpClient.Timeout == 0 {
-		httpClient.Timeout = timeout
+		httpClient = &http.Client{}
+	}
+	if cfg.Timeout > 0 && httpClient.Timeout == 0 {
+		httpClient.Timeout = cfg.Timeout
 	}
 
 	return &CloudClient{
@@ -55,13 +49,13 @@ func NewCloudClient(cfg CloudConfig) *CloudClient {
 }
 
 type CreateDispatchRequest struct {
-	Repo     any    `json:"repo,omitempty"`
-	Org      string `json:"org,omitempty"`
-	Since    string `json:"since"`
-	Until    string `json:"until"`
-	Branches any    `json:"branches"`
-	Generate bool   `json:"generate"`
-	Voice    string `json:"voice,omitempty"`
+	Repos    []string `json:"repos,omitempty"`
+	Orgs     []string `json:"orgs,omitempty"`
+	Since    string   `json:"since"`
+	Until    string   `json:"until"`
+	Branches any      `json:"branches"`
+	Generate bool     `json:"generate"`
+	Voice    string   `json:"voice,omitempty"`
 }
 
 type CreateDispatchResponse struct {

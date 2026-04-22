@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	dispatchpkg "github.com/entireio/cli/cmd/entire/cli/dispatch"
@@ -20,7 +21,7 @@ func TestParseDispatchFlags_OrgDefaultsToAllBranches(t *testing.T) {
 		"",
 		false,
 		nil,
-		"entireio",
+		[]string{"entireio"},
 		"",
 	)
 	if err != nil {
@@ -44,7 +45,7 @@ func TestParseDispatchFlags_ServerReposAreAllowed(t *testing.T) {
 		"",
 		false,
 		[]string{"entireio/cli", "entireio/entire.io"},
-		"",
+		nil,
 		"",
 	)
 	if err != nil {
@@ -74,7 +75,7 @@ func TestParseDispatchFlags_LocalRejectsRepos(t *testing.T) {
 		"",
 		false,
 		[]string{"entireio/cli"},
-		"",
+		nil,
 		"",
 	)
 	if err == nil {
@@ -95,7 +96,7 @@ func TestParseDispatchFlags_LocalRejectsOrg(t *testing.T) {
 		"",
 		false,
 		nil,
-		"entireio",
+		[]string{"entireio"},
 		"",
 	)
 	if err == nil {
@@ -103,6 +104,30 @@ func TestParseDispatchFlags_LocalRejectsOrg(t *testing.T) {
 	}
 	if err.Error() != "--org cannot be used with --local" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseDispatchFlags_MultipleOrgsAreAllowed(t *testing.T) {
+	t.Parallel()
+
+	opts, err := parseDispatchFlags(
+		&cobra.Command{},
+		false,
+		"7d",
+		"",
+		false,
+		nil,
+		[]string{"entireio", "otherco"},
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Orgs, ","); got != "entireio,otherco" {
+		t.Fatalf("expected multi-org scope to propagate, got %q", got)
+	}
+	if opts.Branches != nil {
+		t.Fatalf("expected nil branches for org scope, got %v", opts.Branches)
 	}
 }
 
@@ -116,7 +141,7 @@ func TestParseDispatchFlags_AllBranchesFlag(t *testing.T) {
 		"",
 		true,
 		nil,
-		"",
+		nil,
 		"",
 	)
 	if err != nil {

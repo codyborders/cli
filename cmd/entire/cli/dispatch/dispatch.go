@@ -12,7 +12,7 @@ const (
 type Options struct {
 	Mode                  Mode
 	RepoPaths             []string
-	Org                   string
+	Orgs                  []string
 	Since                 string
 	Until                 string
 	Branches              []string

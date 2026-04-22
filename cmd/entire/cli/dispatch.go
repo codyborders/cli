@@ -26,7 +26,7 @@ func newDispatchCmd() *cobra.Command {
 		flagUntil       string
 		flagAllBranches bool
 		flagRepos       []string
-		flagOrg         string
+		flagOrgs        []string
 		flagVoice       string
 	)
 
@@ -50,7 +50,7 @@ Examples:
 			if shouldRunDispatchWizard(cmd.Flags().NFlag(), isTerminalStdin(os.Stdin), isTerminalWriter(cmd.OutOrStdout())) {
 				opts, err = runDispatchWizard(cmd)
 			} else {
-				opts, err = parseDispatchFlags(cmd, flagLocal, flagSince, flagUntil, flagAllBranches, flagRepos, flagOrg, flagVoice)
+				opts, err = parseDispatchFlags(cmd, flagLocal, flagSince, flagUntil, flagAllBranches, flagRepos, flagOrgs, flagVoice)
 			}
 			if err != nil {
 				if errors.Is(err, errDispatchCancelled) {
@@ -74,7 +74,7 @@ Examples:
 	cmd.Flags().StringVar(&flagUntil, "until", "", "window end time (defaults to now)")
 	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include all branches instead of the default branch scope")
 	cmd.Flags().StringSliceVar(&flagRepos, "repos", nil, "server repo slugs (for example entireio/cli)")
-	cmd.Flags().StringVar(&flagOrg, "org", "", "enumerate checkpoints across an org")
+	cmd.Flags().StringSliceVar(&flagOrgs, "org", nil, "enumerate checkpoints across one or more orgs")
 	cmd.Flags().StringVar(&flagVoice, "voice", "", "voice preset name, file path, or literal description")
 
 	return cmd
@@ -121,7 +121,7 @@ func parseDispatchFlags(
 	flagUntil string,
 	flagAllBranches bool,
 	flagRepos []string,
-	flagOrg string,
+	flagOrgs []string,
 	flagVoice string,
 ) (dispatchpkg.Options, error) {
 	return resolveDispatchOptions(
@@ -130,7 +130,7 @@ func parseDispatchFlags(
 		flagUntil,
 		flagAllBranches,
 		flagRepos,
-		flagOrg,
+		flagOrgs,
 		flagVoice,
 		func() (string, error) {
 			return GetCurrentBranch(cmd.Context())
@@ -144,17 +144,18 @@ func resolveDispatchOptions(
 	flagUntil string,
 	flagAllBranches bool,
 	flagRepos []string,
-	flagOrg string,
+	flagOrgs []string,
 	flagVoice string,
 	currentBranch func() (string, error),
 ) (dispatchpkg.Options, error) {
-	if flagOrg != "" && len(flagRepos) > 0 {
+	flagOrgs = normalizeDispatchScopeValues(flagOrgs)
+	if len(flagOrgs) > 0 && len(flagRepos) > 0 {
 		return dispatchpkg.Options{}, errors.New("--org and --repos are mutually exclusive")
 	}
 	if flagLocal && len(flagRepos) > 0 {
 		return dispatchpkg.Options{}, errors.New("--repos cannot be used with --local")
 	}
-	if flagLocal && flagOrg != "" {
+	if flagLocal && len(flagOrgs) > 0 {
 		return dispatchpkg.Options{}, errors.New("--org cannot be used with --local")
 	}
 
@@ -168,7 +169,7 @@ func resolveDispatchOptions(
 	implicitCurrentBranch := false
 	switch {
 	case allBranches:
-	case len(flagRepos) > 0, strings.TrimSpace(flagOrg) != "":
+	case len(flagRepos) > 0, len(flagOrgs) > 0:
 		branches = nil
 	default:
 		currentBranchName, branchErr := currentBranch()
@@ -182,7 +183,7 @@ func resolveDispatchOptions(
 	return dispatchpkg.Options{
 		Mode:                  mode,
 		RepoPaths:             append([]string(nil), flagRepos...),
-		Org:                   flagOrg,
+		Orgs:                  append([]string(nil), flagOrgs...),
 		Since:                 flagSince,
 		Until:                 flagUntil,
 		Branches:              branches,
@@ -190,4 +191,21 @@ func resolveDispatchOptions(
 		ImplicitCurrentBranch: implicitCurrentBranch,
 		Voice:                 flagVoice,
 	}, nil
+}
+
+func normalizeDispatchScopeValues(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
 }

@@ -29,12 +29,12 @@ func TestServerMode_HappyPath(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		repo, ok := body["repo"].(string)
-		if !ok || repo != testRepoFullName {
-			t.Fatalf("unexpected repo payload: %v", body)
+		repos, ok := body["repos"].([]any)
+		if !ok || len(repos) != 1 || repos[0] != testRepoFullName {
+			t.Fatalf("unexpected repos payload: %v", body)
 		}
-		if _, ok := body["repos"]; ok {
-			t.Fatalf("did not expect repos payload: %v", body)
+		if _, ok := body["repo"]; ok {
+			t.Fatalf("did not expect repo payload: %v", body)
 		}
 		if body["until"] != "2026-04-15T18:30:00Z" {
 			t.Fatalf("unexpected until payload: %v", body["until"])
@@ -110,12 +110,12 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		repos, ok := body["repo"].([]any)
+		repos, ok := body["repos"].([]any)
 		if !ok || len(repos) != 2 || repos[0] != testRepoFullName || repos[1] != "entireio/entire.io" {
-			t.Fatalf("unexpected repo payload: %v", body)
+			t.Fatalf("unexpected repos payload: %v", body)
 		}
-		if _, ok := body["repos"]; ok {
-			t.Fatalf("did not expect repos payload: %v", body)
+		if _, ok := body["repo"]; ok {
+			t.Fatalf("did not expect repo payload: %v", body)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -171,6 +171,68 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 	}
 	if len(got.CoveredRepos) != 2 {
 		t.Fatalf("expected covered repos to propagate, got %v", got.CoveredRepos)
+	}
+}
+
+func TestServerMode_MultipleOrganizationsUseAPIOrgScope(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != testDispatchEndpoint {
+			http.NotFound(w, r)
+			return
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["generate"] != true {
+			t.Fatalf("expected generate=true payload, got %v", body["generate"])
+		}
+		orgs, ok := body["orgs"].([]any)
+		if !ok || len(orgs) != 2 || orgs[0] != "entirehq" || orgs[1] != "entireio" {
+			t.Fatalf("unexpected orgs payload: %v", body)
+		}
+		if _, ok := body["repos"]; ok {
+			t.Fatalf("did not expect repos payload: %v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"window": map[string]any{
+				"normalized_since": "2026-04-09T00:00:00Z",
+				"normalized_until": "2026-04-16T00:00:00Z",
+			},
+			"covered_repos":      []string{"entirehq/.github", "entireio/.github"},
+			"repos":              []any{},
+			"generated_markdown": "# Dispatch across 2 organizations",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer mock.Close()
+
+	oldLookup := lookupCurrentToken
+	oldNow := nowUTC
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
+	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() {
+		lookupCurrentToken = oldLookup
+		nowUTC = oldNow
+	})
+
+	t.Setenv("ENTIRE_API_BASE_URL", mock.URL)
+
+	got, err := Run(context.Background(), Options{
+		Mode:  ModeServer,
+		Orgs:  []string{"entirehq", "entireio"},
+		Since: "7d",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GeneratedText != "# Dispatch across 2 organizations" {
+		t.Fatalf("unexpected generated text: %q", got.GeneratedText)
 	}
 }
 
