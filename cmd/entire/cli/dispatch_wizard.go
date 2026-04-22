@@ -34,6 +34,8 @@ const (
 	dispatchWizardBranchDefault = "default"
 	dispatchWizardBranchCurrent = "current"
 	dispatchWizardBranchAll     = "all"
+
+	dispatchWizardVoiceCustom = "custom"
 )
 
 type dispatchWizardState struct {
@@ -67,7 +69,7 @@ func (s dispatchWizardState) voiceValue() string {
 	switch strings.TrimSpace(s.voicePreset) {
 	case "marvin":
 		return "marvin"
-	case "custom":
+	case dispatchWizardVoiceCustom:
 		if value := strings.TrimSpace(s.voiceCustom); value != "" {
 			return value
 		}
@@ -76,7 +78,7 @@ func (s dispatchWizardState) voiceValue() string {
 }
 
 func (s dispatchWizardState) showCustomVoiceInput() bool {
-	return strings.TrimSpace(s.voicePreset) == "custom"
+	return strings.TrimSpace(s.voicePreset) == dispatchWizardVoiceCustom
 }
 
 func (s dispatchWizardState) effectiveScopeType() string {
@@ -353,7 +355,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 				Options(
 					huh.NewOption("Neutral", "neutral"),
 					huh.NewOption("Marvin", "marvin"),
-					huh.NewOption("Custom", "custom"),
+					huh.NewOption("Custom", dispatchWizardVoiceCustom),
 				).
 				Value(&state.voicePreset),
 		).Title("Voice").Description("Choose a preset voice."),

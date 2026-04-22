@@ -200,7 +200,7 @@ func (m dispatchStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc", "q":
+		case tea.KeyCtrlC.String(), "esc", "q":
 			if m.cancel != nil {
 				m.cancel()
 			}

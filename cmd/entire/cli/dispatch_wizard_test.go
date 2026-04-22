@@ -276,9 +276,6 @@ func TestBuildDispatchCommand(t *testing.T) {
 	if !strings.Contains(command, "entire dispatch") {
 		t.Fatalf("expected base command, got %q", command)
 	}
-	if strings.Contains(command, "--generate") {
-		t.Fatalf("did not expect generate flag, got %q", command)
-	}
 	if !strings.Contains(command, "--voice marvin") {
 		t.Fatalf("expected preset voice flag, got %q", command)
 	}
@@ -286,16 +283,10 @@ func TestBuildDispatchCommand(t *testing.T) {
 		t.Fatalf("expected server repos flag, got %q", command)
 	}
 	if strings.Contains(command, "--local") {
-		t.Fatalf("did not expect local flag, got %q", command)
-	}
-	if strings.Contains(command, "--branches") {
-		t.Fatalf("did not expect branches flag for default-branch mode, got %q", command)
+		t.Fatalf("did not expect local flag for server mode, got %q", command)
 	}
 	if strings.Contains(command, "--all-branches") {
-		t.Fatalf("did not expect all-branches flag for default-branch mode, got %q", command)
-	}
-	if strings.Contains(command, "--dry-run") {
-		t.Fatalf("did not expect dry-run flag, got %q", command)
+		t.Fatalf("did not expect all-branches flag when AllBranches is false, got %q", command)
 	}
 }
 

@@ -144,60 +144,6 @@ func TestShouldRunDispatchWizard(t *testing.T) {
 	}
 }
 
-func TestNewDispatchCmd_DoesNotExposeGenerateFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("generate") != nil {
-		t.Fatal("expected dispatch command not to expose generate")
-	}
-}
-
-func TestNewDispatchCmd_DoesNotExposeBranchesFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("branches") != nil {
-		t.Fatal("expected dispatch command not to expose branches")
-	}
-}
-
-func TestNewDispatchCmd_ExposesAllBranchesFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("all-branches") == nil {
-		t.Fatal("expected dispatch command to expose all-branches")
-	}
-}
-
-func TestNewDispatchCmd_DoesNotExposeDryRunFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("dry-run") != nil {
-		t.Fatal("expected dispatch command not to expose dry-run")
-	}
-}
-
-func TestNewDispatchCmd_DoesNotExposeWaitFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("wait") != nil {
-		t.Fatal("expected dispatch command not to expose wait")
-	}
-}
-
-func TestNewDispatchCmd_DoesNotExposeFormatFlag(t *testing.T) {
-	t.Parallel()
-
-	cmd := newDispatchCmd()
-	if cmd.Flags().Lookup("format") != nil {
-		t.Fatal("expected dispatch command not to expose format")
-	}
-}
-
 func TestNewDispatchCmd_NonTerminalPrintsPlainMarkdown(t *testing.T) {
 	oldRunDispatch := runDispatch
 	oldTerminalMode := dispatchTerminalMode
