@@ -20,9 +20,9 @@ type autoUpdateFixture struct {
 func newAutoUpdateFixture(t *testing.T) *autoUpdateFixture {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CI", "")
 	t.Setenv(envKillSwitch, "")
-	t.Setenv("ACCESSIBLE", "")
+	// Force interactive mode on by default; individual tests can opt out.
+	t.Setenv("ENTIRE_TEST_TTY", "1")
 
 	f := &autoUpdateFixture{confirmValue: true}
 
@@ -32,14 +32,11 @@ func newAutoUpdateFixture(t *testing.T) *autoUpdateFixture {
 		f.lastCommand = cmd
 		return f.installErr
 	}
-	origTerm := stdoutIsTerminal
-	stdoutIsTerminal = func() bool { return true }
 	origConfirm := confirmUpdate
 	confirmUpdate = func() (bool, error) { return f.confirmValue, f.confirmErr }
 
 	t.Cleanup(func() {
 		runInstaller = origRun
-		stdoutIsTerminal = origTerm
 		confirmUpdate = origConfirm
 	})
 	return f
@@ -68,23 +65,10 @@ func TestMaybeAutoUpdate_KillSwitch(t *testing.T) {
 	}
 }
 
-func TestMaybeAutoUpdate_CI(t *testing.T) {
-	f := newAutoUpdateFixture(t)
-	useBrewExecutable(t)
-	t.Setenv("CI", "true")
-
-	var buf bytes.Buffer
-	MaybeAutoUpdate(context.Background(), &buf, "1.0.0")
-
-	if f.installCalls != 0 {
-		t.Errorf("installer called in CI")
-	}
-}
-
 func TestMaybeAutoUpdate_NoTTY(t *testing.T) {
 	f := newAutoUpdateFixture(t)
 	useBrewExecutable(t)
-	stdoutIsTerminal = func() bool { return false }
+	t.Setenv("ENTIRE_TEST_TTY", "0")
 
 	var buf bytes.Buffer
 	MaybeAutoUpdate(context.Background(), &buf, "1.0.0")

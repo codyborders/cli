@@ -10,8 +10,8 @@ import (
 	"runtime"
 
 	"github.com/charmbracelet/huh"
-	"golang.org/x/term"
 
+	"github.com/entireio/cli/cmd/entire/cli/interactive"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
 )
 
@@ -20,14 +20,9 @@ const envKillSwitch = "ENTIRE_NO_AUTO_UPDATE"
 
 // Test seams.
 var (
-	runInstaller     = realRunInstaller
-	stdoutIsTerminal = defaultStdoutIsTerminal
-	confirmUpdate    = realConfirmUpdate
+	runInstaller  = realRunInstaller
+	confirmUpdate = realConfirmUpdate
 )
-
-func defaultStdoutIsTerminal() bool {
-	return term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: uintptr->int is safe for fd
-}
 
 // MaybeAutoUpdate offers an interactive upgrade after the standard
 // "version available" notification has been printed. Silent on every
@@ -36,10 +31,7 @@ func MaybeAutoUpdate(ctx context.Context, w io.Writer, currentVersion string) {
 	if os.Getenv(envKillSwitch) != "" {
 		return
 	}
-	if os.Getenv("CI") != "" {
-		return
-	}
-	if !stdoutIsTerminal() {
+	if !interactive.CanPromptInteractively() {
 		return
 	}
 
