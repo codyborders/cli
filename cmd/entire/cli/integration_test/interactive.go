@@ -26,8 +26,7 @@ func (env *TestEnv) RunCommandInteractive(args []string, respond func(ptyFile *o
 	cmd.Env = append(testutil.GitIsolatedEnv(),
 		"ENTIRE_TEST_CLAUDE_PROJECT_DIR="+env.ClaudeProjectDir,
 		"TERM=xterm",
-		"ACCESSIBLE=1",      // Required: makes huh read from stdin instead of /dev/tty
-		"ENTIRE_TEST_TTY=1", // Override CI=1 guardrail in CanPromptInteractively — pty is real here
+		"ACCESSIBLE=1", // Required: makes huh read from stdin instead of /dev/tty
 	)
 
 	// Start command with a pty

@@ -947,7 +947,7 @@ func StatusToText(status SessionRestoreStatus) string {
 // PromptOverwriteNewerLogs asks the user for confirmation to overwrite local
 // session logs that have newer timestamps than the checkpoint versions.
 func PromptOverwriteNewerLogs(errW io.Writer, sessions []SessionRestoreInfo) (bool, error) {
-	if !interactive.CanPromptInteractively() {
+	if !interactive.HasTTY() {
 		return false, errors.New("cannot prompt to overwrite local session logs in non-interactive mode; rerun with --force to overwrite or use a TTY to confirm")
 	}
 

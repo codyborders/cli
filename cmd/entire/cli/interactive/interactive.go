@@ -5,28 +5,44 @@ package interactive
 
 import "os"
 
-// CanPromptInteractively reports whether interactive confirmation prompts
-// (huh forms, yes/no questions, etc.) can be shown. Returns false in CI,
-// tests without ENTIRE_TEST_TTY=1, and other environments without a
-// controlling TTY.
+// HasTTY checks if /dev/tty is available for interactive prompts.
+// Returns false when running as an agent subprocess (no controlling terminal).
 //
-// ENTIRE_TEST_TTY overrides every other check so tests can exercise both
-// interactive and non-interactive paths deterministically without needing
-// a real pty:
-//   - ENTIRE_TEST_TTY=1 forces interactive mode on
-//   - any other non-empty value forces interactive mode off
-//   - unset falls through to the CI / /dev/tty checks below
-//
-// When ENTIRE_TEST_TTY is unset, CI=true short-circuits to false even if a
-// /dev/tty is attached. Self-hosted runners and some Docker configurations
-// inherit a TTY but cannot respond to prompts, which would otherwise hang
-// the pipeline.
-func CanPromptInteractively() bool {
-	if v, ok := os.LookupEnv("ENTIRE_TEST_TTY"); ok {
+// In test environments, ENTIRE_TEST_TTY overrides the real check:
+//   - ENTIRE_TEST_TTY=1 → simulate human (TTY available)
+//   - ENTIRE_TEST_TTY=0 → simulate agent (no TTY)
+func HasTTY() bool {
+	if v := os.Getenv("ENTIRE_TEST_TTY"); v != "" {
 		return v == "1"
 	}
 
-	if os.Getenv("CI") != "" {
+	// Gemini CLI sets GEMINI_CLI=1 when running shell commands.
+	// Gemini subprocesses may have access to the user's TTY, but they can't
+	// actually respond to interactive prompts. Treat them as non-TTY.
+	// See: https://geminicli.com/docs/tools/shell/
+	if os.Getenv("GEMINI_CLI") != "" {
+		return false
+	}
+
+	// Copilot CLI sets COPILOT_CLI=1 when running hook subprocesses (v0.0.421+).
+	// Like Gemini, the subprocess may inherit the user's TTY but can't respond
+	// to interactive prompts.
+	if os.Getenv("COPILOT_CLI") != "" {
+		return false
+	}
+
+	// Pi Coding Agent sets PI_CODING_AGENT=true when running shell commands.
+	// Like other agents, the subprocess may inherit the TTY but can't respond
+	// to interactive prompts.
+	if os.Getenv("PI_CODING_AGENT") != "" {
+		return false
+	}
+
+	// GIT_TERMINAL_PROMPT=0 disables git's own terminal prompts.
+	// Factory AI Droid (and other non-interactive environments like CI) set this.
+	// Since we run as a git hook, respect it — if the environment doesn't want
+	// git prompting, our hook shouldn't prompt either.
+	if os.Getenv("GIT_TERMINAL_PROMPT") == "0" {
 		return false
 	}
 

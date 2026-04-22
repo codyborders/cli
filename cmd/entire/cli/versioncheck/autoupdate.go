@@ -31,7 +31,7 @@ func MaybeAutoUpdate(ctx context.Context, w io.Writer, currentVersion string) {
 	if os.Getenv(envKillSwitch) != "" {
 		return
 	}
-	if !interactive.CanPromptInteractively() {
+	if !interactive.HasTTY() {
 		return
 	}
 
