@@ -80,14 +80,14 @@ func TestRenderStatCards_ContainsAllLabels(t *testing.T) {
 	stats := contributionStats{
 		Throughput:    23.2,
 		Iteration:     1.4,
-		Orchestration: 80,
+		ContinuityH:   0.8,
 		Streak:        20,
 		CurrentStreak: 17,
 	}
 	renderStatCards(&buf, sty, stats)
 	out := buf.String()
 
-	for _, want := range []string{"THROUGHPUT", "ITERATION", "ORCHESTRATION", "STREAK"} {
+	for _, want := range []string{"THROUGHPUT", "ITERATION", "CONTINUITY", "STREAK"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing label %q", want)
 		}
@@ -95,8 +95,8 @@ func TestRenderStatCards_ContainsAllLabels(t *testing.T) {
 	if !strings.Contains(out, "23.2") {
 		t.Errorf("output missing throughput value 23.2")
 	}
-	if !strings.Contains(out, "80") {
-		t.Errorf("output missing orchestration value 80")
+	if !strings.Contains(out, "0.8") {
+		t.Errorf("output missing continuity hours value 0.8")
 	}
 	if !strings.Contains(out, "17 current") {
 		t.Errorf("output missing current streak")

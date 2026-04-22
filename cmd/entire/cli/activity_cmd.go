@@ -79,9 +79,9 @@ func runActivityStatic(ctx context.Context, w io.Writer, client *api.Client) err
 		Tasks:         activity.Stats.Tasks,
 		Throughput:    activity.Stats.Throughput,
 		Iteration:     activity.Stats.Iteration,
-		Orchestration: activity.Stats.Orchestration,
-		Streak:        activity.Stats.Streak,
-		CurrentStreak: activity.Stats.CurrentStreak,
+		ContinuityH:   activity.Stats.ContinuityHours,
+		Streak:        activity.Stats.LifetimeStreak,
+		CurrentStreak: activity.Stats.LifetimeCurrentStreak,
 	}
 	days := groupCommitsByDay(commits)
 

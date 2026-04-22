@@ -15,12 +15,15 @@ type userActivityResponse struct {
 }
 
 type activityStatsResponse struct {
-	Tasks         int     `json:"tasks"`
-	Orchestration int     `json:"orchestration"` // 0-100, percentage
-	Iteration     float64 `json:"iteration"`
-	Throughput    float64 `json:"throughput"`
-	Streak        int     `json:"streak"`
-	CurrentStreak int     `json:"current_streak"`
+	Tasks                 int     `json:"tasks"`
+	Orchestration         int     `json:"orchestration"` // 0-100, percentage
+	Iteration             float64 `json:"iteration"`
+	Throughput            float64 `json:"throughput"`
+	ContinuityHours       float64 `json:"continuity_hours"`
+	Streak                int     `json:"streak"`                  // scoped to timeframe
+	CurrentStreak         int     `json:"current_streak"`          // scoped to timeframe
+	LifetimeStreak        int     `json:"lifetime_streak"`         // last 365 days
+	LifetimeCurrentStreak int     `json:"lifetime_current_streak"` // last 365 days
 }
 
 // userCommitCheckpoint is checkpoint info nested inside a commit.
@@ -61,9 +64,9 @@ type contributionStats struct {
 	Tasks         int
 	Throughput    float64 // avg tokens/checkpoint in thousands
 	Iteration     float64 // avg session_count per checkpoint
-	Orchestration int     // sum(steps) / (sum(steps) + count) * 100
-	Streak        int     // longest consecutive days
-	CurrentStreak int     // current streak from today
+	ContinuityH   float64 // peak session length in hours (max(steps)*2/60)
+	Streak        int     // longest consecutive days (last 365)
+	CurrentStreak int     // current streak ending today (last 365)
 }
 
 // repoContribution matches the API's `repos[]` shape. Agents is keyed by the
