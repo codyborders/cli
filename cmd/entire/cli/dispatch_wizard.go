@@ -44,7 +44,7 @@ type dispatchWizardState struct {
 	timeWindowPreset string
 	branchMode       string
 	selectedRepos    []string
-	selectedOrg      string
+	selectedOrgs     []string
 	voicePreset      string
 	voiceCustom      string
 	confirmRun       bool
@@ -107,11 +107,44 @@ func (s dispatchWizardState) effectiveBranchMode() string {
 	return s.branchMode
 }
 
-func (s dispatchWizardState) selectedRepoPaths() []string {
-	if s.isLocal() || s.effectiveScopeType() != dispatchWizardScopeSelectedRepos {
+func (s dispatchWizardState) selectedRepoPaths(availableRepos []string) []string {
+	if s.isLocal() {
 		return nil
 	}
-	return append([]string(nil), s.selectedRepos...)
+
+	switch s.effectiveScopeType() {
+	case dispatchWizardScopeSelectedRepos:
+		return append([]string(nil), s.selectedRepos...)
+	case dispatchWizardScopeOrganization:
+		if len(s.selectedOrgs) == 0 {
+			return nil
+		}
+		orgs := make(map[string]struct{}, len(s.selectedOrgs))
+		for _, org := range s.selectedOrgs {
+			org = strings.TrimSpace(org)
+			if org != "" {
+				orgs[org] = struct{}{}
+			}
+		}
+		if len(orgs) == 0 {
+			return nil
+		}
+
+		filtered := make([]string, 0, len(availableRepos))
+		for _, repo := range availableRepos {
+			owner, _, found := strings.Cut(repo, "/")
+			if !found {
+				continue
+			}
+			if _, ok := orgs[owner]; ok {
+				filtered = append(filtered, repo)
+			}
+		}
+		sort.Strings(filtered)
+		return filtered
+	default:
+		return nil
+	}
 }
 
 func (s dispatchWizardState) showRepoPicker() bool {
@@ -126,21 +159,14 @@ func (s dispatchWizardState) showOrganizationPicker() bool {
 	return !s.isLocal() && s.effectiveScopeType() == dispatchWizardScopeOrganization
 }
 
-func (s dispatchWizardState) orgValue() string {
-	if s.isLocal() || s.effectiveScopeType() != dispatchWizardScopeOrganization {
-		return ""
-	}
-	return strings.TrimSpace(s.selectedOrg)
-}
-
-func (s dispatchWizardState) resolve(currentBranch func() (string, error)) (dispatchpkg.Options, error) {
+func (s dispatchWizardState) resolve(availableRepos []string, currentBranch func() (string, error)) (dispatchpkg.Options, error) {
 	return resolveDispatchOptions(
 		s.isLocal(),
 		s.timeWindowPreset,
 		"",
 		s.effectiveBranchMode() == dispatchWizardBranchAll,
-		s.selectedRepoPaths(),
-		s.orgValue(),
+		s.selectedRepoPaths(availableRepos),
+		"",
 		s.voiceValue(),
 		currentBranch,
 	)
@@ -151,8 +177,8 @@ func (s dispatchWizardState) scopeOptions() []huh.Option[string] {
 		return []huh.Option[string]{huh.NewOption("Current repo", dispatchWizardScopeCurrentRepo)}
 	}
 	return []huh.Option[string]{
-		huh.NewOption("Selected repos", dispatchWizardScopeSelectedRepos),
-		huh.NewOption("Organization", dispatchWizardScopeOrganization),
+		huh.NewOption("Repos", dispatchWizardScopeSelectedRepos),
+		huh.NewOption("Organizations", dispatchWizardScopeOrganization),
 	}
 }
 
@@ -277,6 +303,16 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 	go loadOrgs()
 
 	state := newDispatchWizardState()
+	availableCloudRepos := func() []string {
+		options := loadRepos()
+		repos := make([]string, 0, len(options))
+		for _, option := range options {
+			if option.Value != "" {
+				repos = append(repos, option.Value)
+			}
+		}
+		return repos
+	}
 	currentBranch := func() (string, error) {
 		return GetCurrentBranch(ctx)
 	}
@@ -318,17 +354,19 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 			return !state.showRepoPicker()
 		}),
 		huh.NewGroup(
-			huh.NewSelect[string]().
+			huh.NewMultiSelect[string]().
+				Title("Organizations").
+				Description("Press / to filter.").
+				Filterable(true).
 				OptionsFunc(loadOrgs, nil).
-				Height(0).
-				Value(&state.selectedOrg).
-				Validate(func(value string) error {
-					if state.effectiveScopeType() == dispatchWizardScopeOrganization && strings.TrimSpace(value) == "" {
-						return errors.New("select an organization")
+				Value(&state.selectedOrgs).
+				Validate(func(value []string) error {
+					if state.effectiveScopeType() == dispatchWizardScopeOrganization && len(value) == 0 {
+						return errors.New("select at least one organization")
 					}
 					return nil
 				}),
-		).Title("Organization").Description("Choose which organization to include.").
+		).Title("Organizations").Description("Choose which organizations to include.").
 			WithHideFunc(func() bool {
 				return !state.showOrganizationPicker()
 			}),
@@ -377,7 +415,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 			huh.NewNote().
 				Title("Resolved options").
 				DescriptionFunc(func() string {
-					opts, resolveErr := state.resolve(currentBranch)
+					opts, resolveErr := state.resolve(availableCloudRepos(), currentBranch)
 					if resolveErr != nil {
 						return "Validation error: " + resolveErr.Error()
 					}
@@ -386,7 +424,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 			huh.NewNote().
 				Title("Command").
 				DescriptionFunc(func() string {
-					opts, resolveErr := state.resolve(currentBranch)
+					opts, resolveErr := state.resolve(availableCloudRepos(), currentBranch)
 					if resolveErr != nil {
 						return "Validation error: " + resolveErr.Error()
 					}
@@ -413,7 +451,7 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 		return dispatchpkg.Options{}, errDispatchCancelled
 	}
 
-	return state.resolve(currentBranch)
+	return state.resolve(availableCloudRepos(), currentBranch)
 }
 
 // newLazyOptions returns a func that runs loader once (under sync.Once) and

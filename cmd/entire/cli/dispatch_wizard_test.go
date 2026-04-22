@@ -41,9 +41,9 @@ func TestDispatchWizardState_ResolveOrgDefaultsToDefaultBranches(t *testing.T) {
 	state := newDispatchWizardState()
 	state.modeChoice = dispatchWizardModeServer
 	state.scopeType = dispatchWizardScopeOrganization
-	state.selectedOrg = "entireio"
+	state.selectedOrgs = []string{"entireio"}
 
-	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve([]string{"entireio/cli", "entirehq/entire.io"}, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestDispatchWizardState_ResolveAllBranches(t *testing.T) {
 	state := newDispatchWizardState()
 	state.branchMode = dispatchWizardBranchAll
 
-	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestDispatchWizardState_ServerModeKeepsSelectedReposScope(t *testing.T) {
 		t.Fatalf("expected server mode to keep selected repos scope, got %q", got)
 	}
 
-	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve([]string{"entireio/cli"}, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatalf("expected server mode to resolve selected repos, got %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 
 	state := newDispatchWizardState()
 	state.voicePreset = testDispatchVoicePresetMarvin
-	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 	}
 
 	state.voicePreset = testDispatchVoicePresetNeutral
-	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err = state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestDispatchWizardState_ResolveVoiceInput(t *testing.T) {
 	}
 	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "dry, skeptical release note narrator"
-	opts, err = state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err = state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestDispatchWizardState_ResolveEmptyVoiceDefaultsToNeutral(t *testing.T) {
 	state.voicePreset = testDispatchVoicePresetCustom
 	state.voiceCustom = "   "
 
-	opts, err := state.resolve(func() (string, error) { return testDispatchPreviewBranch, nil })
+	opts, err := state.resolve(nil, func() (string, error) { return testDispatchPreviewBranch, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

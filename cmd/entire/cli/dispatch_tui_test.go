@@ -61,10 +61,10 @@ func TestDispatchStatusModel_ViewRendersInlineCard(t *testing.T) {
 	model.height = 24
 
 	view := model.View()
-	if strings.HasPrefix(view, "\n") {
-		t.Fatalf("expected inline view without leading blank lines: %q", view)
+	if !strings.HasPrefix(view, "\n") {
+		t.Fatalf("expected inline view with a leading blank line: %q", view)
 	}
-	if strings.HasPrefix(view, " ") {
+	if strings.HasPrefix(strings.TrimPrefix(view, "\n"), " ") {
 		t.Fatalf("expected inline view without leading padding: %q", view)
 	}
 	if got := strings.Count(view, "\n"); got >= 20 {

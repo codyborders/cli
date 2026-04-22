@@ -10,8 +10,10 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
 	dispatchpkg "github.com/entireio/cli/cmd/entire/cli/dispatch"
+	"github.com/muesli/termenv"
 )
 
 type dispatchRenderResult struct {
@@ -88,7 +90,7 @@ func defaultRunInteractiveDispatch(ctx context.Context, outW io.Writer, opts dis
 
 func defaultRenderTerminalMarkdown(w io.Writer, markdown string) (string, error) {
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithEnvironmentConfig(),
+		glamour.WithStyles(dispatchMarkdownStyles()),
 		glamour.WithWordWrap(getTerminalWidth(w)),
 		glamour.WithPreservedNewLines(),
 	)
@@ -109,9 +111,10 @@ func newDispatchStatusModel(
 	run func(context.Context) (string, error),
 ) dispatchStatusModel {
 	ss := newStatusStyles(w)
+	styles := newDispatchStatusStyles(ss)
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	if ss.colorEnabled {
-		sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		sp.Style = styles.spinner
 	}
 
 	title := "Generating dispatch"
@@ -119,7 +122,7 @@ func newDispatchStatusModel(
 
 	return dispatchStatusModel{
 		spinner:  sp,
-		styles:   newDispatchStatusStyles(ss),
+		styles:   styles,
 		title:    title,
 		subtitle: subtitle,
 		details:  dispatchStatusDetails(opts),
@@ -143,12 +146,191 @@ func newDispatchStatusStyles(ss statusStyles) dispatchStatusStyles {
 		return styles
 	}
 
-	styles.title = styles.title.Foreground(lipgloss.Color("214"))
+	styles.title = styles.title.Foreground(lipgloss.Color("#fb923c"))
 	styles.subtitle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	styles.detail = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styles.footer = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styles.spinner = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	styles.detail = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styles.footer = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styles.spinner = lipgloss.NewStyle().Foreground(lipgloss.Color("#fb923c")).Bold(true)
 	return styles
+}
+
+func dispatchMarkdownStyles() ansi.StyleConfig {
+	return dispatchMarkdownStylesForBackground(termenv.HasDarkBackground())
+}
+
+func dispatchMarkdownStylesForBackground(darkBackground bool) ansi.StyleConfig {
+	var styles ansi.StyleConfig
+	if darkBackground {
+		styles = glamour.DarkStyleConfig
+	} else {
+		styles = glamour.LightStyleConfig
+	}
+
+	if darkBackground {
+		styles.Document.Color = stringPtr("252")
+		styles.Heading.Color = stringPtr("252")
+		styles.Code.BackgroundColor = stringPtr("236")
+		styles.CodeBlock.Color = stringPtr("252")
+	} else {
+		styles.Document.Color = stringPtr("234")
+		styles.Heading.Color = stringPtr("234")
+		styles.Code.BackgroundColor = stringPtr("254")
+		styles.CodeBlock.Color = stringPtr("242")
+	}
+	styles.Heading.Bold = boolPtr(true)
+
+	styles.H1.Prefix = "# "
+	styles.H1.Suffix = ""
+	styles.H1.Color = stringPtr("#fb923c")
+	styles.H1.BackgroundColor = nil
+	styles.H1.Bold = boolPtr(true)
+
+	styles.H2.Color = stringPtr("#22d3ee")
+	styles.H2.Bold = boolPtr(true)
+	styles.H3.Color = stringPtr("#818cf8")
+	styles.H3.Bold = boolPtr(true)
+	styles.H4.Color = stringPtr("252")
+	styles.H4.Bold = boolPtr(true)
+	styles.H5.Color = stringPtr("245")
+	styles.H5.Bold = boolPtr(true)
+	styles.H6.Color = stringPtr("245")
+	styles.H6.Bold = boolPtr(false)
+
+	styles.HorizontalRule.Color = stringPtr("240")
+	styles.Item.Color = stringPtr("#fb923c")
+	styles.Enumeration.Color = stringPtr("#818cf8")
+	styles.BlockQuote.Color = stringPtr("245")
+
+	styles.Link.Color = stringPtr("#22d3ee")
+	styles.Link.Underline = boolPtr(true)
+	styles.LinkText.Color = stringPtr("#818cf8")
+	styles.LinkText.Bold = boolPtr(true)
+
+	styles.Code.Color = stringPtr("#fb923c")
+	if darkBackground {
+		styles.CodeBlock.Chroma = &ansi.Chroma{
+			Text: ansi.StylePrimitive{
+				Color: stringPtr("252"),
+			},
+			Error: ansi.StylePrimitive{
+				Color: stringPtr("252"),
+			},
+			Comment: ansi.StylePrimitive{
+				Color:  stringPtr("245"),
+				Italic: boolPtr(true),
+			},
+			Keyword: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+				Bold:  boolPtr(true),
+			},
+			KeywordReserved: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+				Bold:  boolPtr(true),
+			},
+			Name: ansi.StylePrimitive{
+				Color: stringPtr("252"),
+			},
+			NameFunction: ansi.StylePrimitive{
+				Color: stringPtr("#22d3ee"),
+			},
+			NameBuiltin: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+			},
+			Literal: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			LiteralString: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			LiteralNumber: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			Operator: ansi.StylePrimitive{
+				Color: stringPtr("244"),
+			},
+			Punctuation: ansi.StylePrimitive{
+				Color: stringPtr("244"),
+			},
+			GenericDeleted: ansi.StylePrimitive{
+				Color: stringPtr("1"),
+			},
+			GenericInserted: ansi.StylePrimitive{
+				Color: stringPtr("2"),
+			},
+			Background: ansi.StylePrimitive{
+				BackgroundColor: stringPtr("236"),
+			},
+		}
+	} else {
+		styles.CodeBlock.Chroma = &ansi.Chroma{
+			Text: ansi.StylePrimitive{
+				Color: stringPtr("#2A2A2A"),
+			},
+			Error: ansi.StylePrimitive{
+				Color: stringPtr("#2A2A2A"),
+			},
+			Comment: ansi.StylePrimitive{
+				Color:  stringPtr("#8D8D8D"),
+				Italic: boolPtr(true),
+			},
+			Keyword: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+				Bold:  boolPtr(true),
+			},
+			KeywordReserved: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+				Bold:  boolPtr(true),
+			},
+			Name: ansi.StylePrimitive{
+				Color: stringPtr("#2A2A2A"),
+			},
+			NameFunction: ansi.StylePrimitive{
+				Color: stringPtr("#22d3ee"),
+			},
+			NameBuiltin: ansi.StylePrimitive{
+				Color: stringPtr("#818cf8"),
+			},
+			Literal: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			LiteralString: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			LiteralNumber: ansi.StylePrimitive{
+				Color: stringPtr("#fbbf24"),
+			},
+			Operator: ansi.StylePrimitive{
+				Color: stringPtr("#7A7A7A"),
+			},
+			Punctuation: ansi.StylePrimitive{
+				Color: stringPtr("#7A7A7A"),
+			},
+			GenericDeleted: ansi.StylePrimitive{
+				Color: stringPtr("1"),
+			},
+			GenericInserted: ansi.StylePrimitive{
+				Color: stringPtr("2"),
+			},
+			Background: ansi.StylePrimitive{
+				BackgroundColor: stringPtr("254"),
+			},
+		}
+	}
+
+	styles.Table.Color = stringPtr("245")
+	styles.Table.CenterSeparator = stringPtr(" ")
+	styles.Table.ColumnSeparator = stringPtr(" ")
+	styles.Table.RowSeparator = stringPtr("-")
+
+	return styles
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func stringPtr(v string) *string {
+	return &v
 }
 
 func dispatchStatusDetails(opts dispatchpkg.Options) []string {
@@ -224,7 +406,7 @@ func (m dispatchStatusModel) View() string {
 	}
 	lines = append(lines, "", m.styles.footer.Render(m.footer))
 
-	return m.styles.card.Width(cardWidth).Render(strings.Join(lines, "\n"))
+	return "\n" + m.styles.card.Width(cardWidth).Render(strings.Join(lines, "\n"))
 }
 
 func (m dispatchStatusModel) runDispatch() tea.Cmd {
