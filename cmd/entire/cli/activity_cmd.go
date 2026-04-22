@@ -155,10 +155,14 @@ func fetchCommits(ctx context.Context, client *api.Client) ([]userCommit, error)
 	return result.Commits, nil
 }
 
-// detectTimezone returns an IANA timezone identifier for the current host.
-// Tries $TZ first, then the /etc/localtime symlink (Unix), falling back to UTC.
-// Each candidate is normalized and validated; bogus or POSIX-style values
-// (e.g. UTC0, EST5EDT) fall through rather than being forwarded to the API.
+// detectTimezone returns a best-effort timezone name for the current host.
+// Order: $TZ → /etc/localtime symlink → time.Local → "UTC" as last resort.
+// A candidate that fails normalization is skipped (not forwarded, not coerced
+// to UTC), so a bogus $TZ on a correctly-configured box still yields the
+// system timezone from /etc/localtime. The server is the canonical authority
+// for what counts as a valid zone and falls back to UTC for anything it
+// doesn't recognize, so we only do enough validation to avoid sending
+// obvious garbage (paths, POSIX forms Go can't load, the "Local" sentinel).
 func detectTimezone() string {
 	if tz := normalizeTimezone(os.Getenv("TZ")); tz != "" {
 		return tz
@@ -174,10 +178,17 @@ func detectTimezone() string {
 	return "UTC"
 }
 
-// normalizeTimezone returns a validated IANA zone name, or "" if the input
-// can't be resolved. Strips the POSIX ":" prefix and zoneinfo path prefixes,
-// then checks the result loads via time.LoadLocation so POSIX forms like
-// "UTC0" or "EST5EDT" don't reach the API.
+// normalizeTimezone returns a name Go can load as a time zone, or "" if the
+// input can't be resolved. It strips the POSIX ":" prefix and zoneinfo path
+// prefix, then requires time.LoadLocation to succeed.
+//
+// This is not strict IANA-only validation: Go's LoadLocation accepts legacy
+// aliases like EST5EDT, GMT0, and PST8PDT in addition to Area/Location
+// names. Those may or may not be canonically understood by the server — if
+// the server doesn't recognize one, it falls back to UTC on its end. We
+// accept that mild mis-bucketing risk as the price of a simple check that
+// catches the common failure modes (paths, unknown POSIX forms like UTC0,
+// typos, the "Local" sentinel).
 func normalizeTimezone(raw string) string {
 	name := strings.TrimPrefix(raw, ":")
 	const marker = "/zoneinfo/"

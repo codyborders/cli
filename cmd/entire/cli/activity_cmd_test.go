@@ -164,8 +164,12 @@ func TestDetectTimezone_HonoursTZEnv(t *testing.T) {
 }
 
 func TestDetectTimezone_FallsBackToUTCForInvalidTZ(t *testing.T) {
-	// POSIX-style TZ values and bogus names should not leak to the API;
-	// detectTimezone should validate and fall through to a loadable IANA name.
+	// Values Go can't parse as a zone must not reach the API verbatim — the
+	// function should skip them and try the next source (/etc/localtime,
+	// time.Local, or finally "UTC"). This doesn't guarantee strictly-IANA
+	// names reach the server (Go accepts legacy aliases like EST5EDT);
+	// the server is responsible for falling back to UTC for anything it
+	// doesn't recognize.
 	for _, tz := range []string{"UTC0", "bogus/zone", "Not_A_Zone"} {
 		t.Run(tz, func(t *testing.T) {
 			t.Setenv("TZ", tz)
@@ -184,6 +188,10 @@ func TestDetectTimezone_FallsBackToUTCForInvalidTZ(t *testing.T) {
 
 func TestNormalizeTimezone(t *testing.T) {
 	t.Parallel()
+	// These cases pin the contract we actually commit to: prefix stripping,
+	// rejecting inputs Go can't load, and the "Local" sentinel. We don't
+	// test that legacy aliases like EST5EDT are rejected — they're not;
+	// Go loads them and we pass them through to the server.
 	tests := []struct {
 		name, input, want string
 	}{
@@ -193,7 +201,7 @@ func TestNormalizeTimezone(t *testing.T) {
 		{"darwin zoneinfo path", "/var/db/timezone/zoneinfo/Europe/Berlin", "Europe/Berlin"},
 		{"colon plus path", ":/usr/share/zoneinfo/UTC", "UTC"},
 		{"UTC", "UTC", "UTC"},
-		{"POSIX UTC0", "UTC0", ""},
+		{"unloadable POSIX", "UTC0", ""},
 		{"bogus", "Not_A_Zone", ""},
 		{"empty", "", ""},
 		{"Local sentinel", "Local", ""},
