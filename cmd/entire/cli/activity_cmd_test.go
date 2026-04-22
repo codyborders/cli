@@ -163,6 +163,52 @@ func TestDetectTimezone_HonoursTZEnv(t *testing.T) {
 	}
 }
 
+func TestDetectTimezone_FallsBackToUTCForInvalidTZ(t *testing.T) {
+	// POSIX-style TZ values and bogus names should not leak to the API;
+	// detectTimezone should validate and fall through to a loadable IANA name.
+	for _, tz := range []string{"UTC0", "bogus/zone", "Not_A_Zone"} {
+		t.Run(tz, func(t *testing.T) {
+			t.Setenv("TZ", tz)
+			got := detectTimezone()
+			// /etc/localtime may supply a valid IANA name, so we don't assert
+			// strictly "UTC" — but the raw invalid TZ must never round-trip.
+			if got == tz {
+				t.Errorf("detectTimezone() forwarded raw TZ=%q unchanged", tz)
+			}
+			if _, err := time.LoadLocation(got); err != nil {
+				t.Errorf("detectTimezone() = %q, not loadable as IANA zone", got)
+			}
+		})
+	}
+}
+
+func TestNormalizeTimezone(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, input, want string
+	}{
+		{"plain IANA", "America/New_York", "America/New_York"},
+		{"colon-prefixed", ":America/New_York", "America/New_York"},
+		{"linux zoneinfo path", "/usr/share/zoneinfo/Europe/Berlin", "Europe/Berlin"},
+		{"darwin zoneinfo path", "/var/db/timezone/zoneinfo/Europe/Berlin", "Europe/Berlin"},
+		{"colon plus path", ":/usr/share/zoneinfo/UTC", "UTC"},
+		{"UTC", "UTC", "UTC"},
+		{"POSIX UTC0", "UTC0", ""},
+		{"bogus", "Not_A_Zone", ""},
+		{"empty", "", ""},
+		{"Local sentinel", "Local", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeTimezone(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeTimezone(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		(len(s) > 0 && stringContains(s, sub)))

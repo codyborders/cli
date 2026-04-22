@@ -157,20 +157,40 @@ func fetchCommits(ctx context.Context, client *api.Client) ([]userCommit, error)
 
 // detectTimezone returns an IANA timezone identifier for the current host.
 // Tries $TZ first, then the /etc/localtime symlink (Unix), falling back to UTC.
+// Each candidate is normalized and validated; bogus or POSIX-style values
+// (e.g. UTC0, EST5EDT) fall through rather than being forwarded to the API.
 func detectTimezone() string {
-	if tz := os.Getenv("TZ"); tz != "" {
+	if tz := normalizeTimezone(os.Getenv("TZ")); tz != "" {
 		return tz
 	}
 	if link, err := os.Readlink("/etc/localtime"); err == nil {
-		const marker = "/zoneinfo/"
-		if idx := strings.LastIndex(link, marker); idx >= 0 {
-			return link[idx+len(marker):]
+		if tz := normalizeTimezone(link); tz != "" {
+			return tz
 		}
 	}
-	if name := time.Local.String(); name != "" && name != "Local" {
-		return name
+	if tz := normalizeTimezone(time.Local.String()); tz != "" {
+		return tz
 	}
 	return "UTC"
+}
+
+// normalizeTimezone returns a validated IANA zone name, or "" if the input
+// can't be resolved. Strips the POSIX ":" prefix and zoneinfo path prefixes,
+// then checks the result loads via time.LoadLocation so POSIX forms like
+// "UTC0" or "EST5EDT" don't reach the API.
+func normalizeTimezone(raw string) string {
+	name := strings.TrimPrefix(raw, ":")
+	const marker = "/zoneinfo/"
+	if idx := strings.LastIndex(name, marker); idx >= 0 {
+		name = name[idx+len(marker):]
+	}
+	if name == "" || name == "Local" {
+		return ""
+	}
+	if _, err := time.LoadLocation(name); err != nil {
+		return ""
+	}
+	return name
 }
 
 func groupCommitsByDay(commits []userCommit) []commitDay {
