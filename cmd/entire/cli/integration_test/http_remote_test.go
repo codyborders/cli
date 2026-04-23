@@ -197,7 +197,7 @@ func assertRemoteHasCheckpointCommit(t *testing.T, bareDir, checkpointID string)
 // TestHTTPS_PushCheckpointBranchToRemote verifies that PrePush pushes the
 // checkpoint branch to an HTTPS remote when ENTIRE_CHECKPOINT_TOKEN is set.
 // This exercises:
-//   - CheckpointGitCommand HTTPS protocol detection and token injection
+//   - remote.newCommand HTTPS protocol detection and token injection
 //   - tryPushSessionsCommon over HTTPS with Authorization header
 //   - go-git backend.requireReceivePackAuth validates the header
 func TestHTTPS_PushCheckpointBranchToRemote(t *testing.T) {

@@ -74,8 +74,7 @@ func Fetch(ctx context.Context, opts FetchOptions) ([]byte, error) {
 // --no-write-fetch-head to avoid polluting FETCH_HEAD.
 //
 // The remote should be a URL (not a remote name) to avoid persisting promisor
-// settings onto the named remote. Use resolveCheckpointFetchTarget or
-// FetchURL to obtain the URL.
+// settings onto the named remote. Use FetchURL to obtain the URL.
 func FetchBlobs(ctx context.Context, remote string, hashes []string) error {
 	args := []string{"fetch", "--no-tags", "--no-write-fetch-head", remote}
 	args = append(args, hashes...)

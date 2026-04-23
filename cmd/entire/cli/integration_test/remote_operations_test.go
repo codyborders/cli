@@ -177,7 +177,7 @@ func TestPrePush_PushDisabledSkipsCheckpoints(t *testing.T) {
 //
 // Why not test through PrePush directly: resolvePushSettings derives the checkpoint
 // URL from origin's protocol (SSH/HTTPS). Since integration tests use local file
-// paths as remotes, parseGitRemoteURL fails and resolvePushSettings falls back to
+// paths as remotes, remote.ParseURL fails and resolvePushSettings falls back to
 // origin. The URL derivation logic is unit-tested in checkpoint_remote_test.go
 // (TestDeriveCheckpointURL, TestResolvePushSettings_WithCheckpointRemote_*).
 //
@@ -235,7 +235,7 @@ func TestPrePush_CheckpointURLDerivationFailureFallsBackToOrigin(t *testing.T) {
 
 	// Configure checkpoint_remote with a different owner than origin.
 	// Since our bare remote is a local path (not a URL), resolvePushSettings cannot
-	// parse it via parseGitRemoteURL and falls back to origin. The unit test
+	// parse it via remote.ParseURL and falls back to origin. The unit test
 	// TestResolvePushSettings_ForkDetection in checkpoint_remote_test.go validates
 	// the exact fork detection logic with real URL parsing.
 	env.PatchSettings(map[string]any{
@@ -267,7 +267,7 @@ func TestPrePush_CheckpointURLDerivationFailureFallsBackToOrigin(t *testing.T) {
 	env.GitCommitWithShadowHooks("Add middleware", "middleware.go")
 
 	// Run PrePush -- with a local path remote, checkpoint URL derivation will fail
-	// (parseGitRemoteURL can't parse local paths), so checkpoints fall back to origin.
+	// (remote.ParseURL can't parse local paths), so checkpoints fall back to origin.
 	env.RunPrePush("origin")
 
 	// Checkpoints should be on origin (fallback behavior)

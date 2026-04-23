@@ -299,7 +299,10 @@ func resolvePushFallbackURL(ctx context.Context, pushRemoteName, originURL strin
 		}
 		return originURL, nil
 	}
-	if pushRemoteName == "" || pushRemoteName == originRemote {
+	if pushRemoteName == "" {
+		return "", fmt.Errorf("no push remote specified and remote %q not found", originRemote)
+	}
+	if pushRemoteName == originRemote {
 		return "", fmt.Errorf("remote %q not found", originRemote)
 	}
 	pushURL, err := GetRemoteURL(ctx, pushRemoteName)
