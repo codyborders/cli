@@ -443,6 +443,39 @@ func TestAttach_RefusesWhenCheckpointOnlyInRemoteTrackingRef(t *testing.T) {
 	}
 }
 
+// In v2-only mode, the refuse hint must reference the v2 /main ref and
+// its fully-qualified refspec (refs/entire/checkpoints/v2/main lives under
+// refs/entire/, not refs/heads/, so a short refspec won't resolve).
+func TestAttach_RefuseHint_V2Only(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	repoRoot := mustGetwd(t)
+	setAttachCheckpointsV2Only(t, repoRoot)
+
+	runGitInDir(t, repoRoot, "commit", "--amend", "-m", "init\n\nEntire-Checkpoint: ffffffffeeee")
+
+	sessionID := "v2-orphaned-attach"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"hi"},"uuid":"u1"}
+`)
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, true)
+	if err == nil {
+		t.Fatal("expected v2-only attach to refuse when checkpoint is missing")
+	}
+	if !strings.Contains(err.Error(), "missing from the local v2 /main ref") {
+		t.Errorf("error should describe the v2 /main ref; got: %v", err)
+	}
+	v2Refspec := paths.V2MainRefName + ":" + paths.V2MainRefName
+	if !strings.Contains(err.Error(), v2Refspec) {
+		t.Errorf("error should include v2 refspec %q; got: %v", v2Refspec, err)
+	}
+	// And must NOT suggest the v1 refspec.
+	if strings.Contains(err.Error(), "entire/checkpoints/v1:entire/checkpoints/v1") {
+		t.Errorf("v2-only hint should not reference the v1 branch; got: %v", err)
+	}
+}
+
 func TestAttach_PopulatesTokenUsage(t *testing.T) {
 	setupAttachTestRepo(t)
 
@@ -924,6 +957,18 @@ func setAttachCheckpointsV2Enabled(t *testing.T, repoDir string) {
 		t.Fatal(err)
 	}
 	settingsContent := `{"enabled": true, "strategy_options": {"checkpoints_v2": true}}`
+	if err := os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setAttachCheckpointsV2Only(t *testing.T, repoDir string) {
+	t.Helper()
+	entireDir := filepath.Join(repoDir, ".entire")
+	if err := os.MkdirAll(entireDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	settingsContent := `{"enabled": true, "strategy_options": {"checkpoints_version": 2}}`
 	if err := os.WriteFile(filepath.Join(entireDir, "settings.json"), []byte(settingsContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
