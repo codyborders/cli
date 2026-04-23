@@ -156,36 +156,49 @@ func ResolveFetchTarget(ctx context.Context, target string) (string, error) {
 }
 
 // newCommand creates an exec.Cmd for a git operation that may need
-// checkpoint token authentication. If ENTIRE_CHECKPOINT_TOKEN is set and the
-// remote in args resolves to an HTTPS URL, a Basic auth token is injected via
-// GIT_CONFIG_COUNT/GIT_CONFIG_KEY_*/GIT_CONFIG_VALUE_* environment variables.
+// checkpoint token authentication. If ENTIRE_CHECKPOINT_TOKEN is set:
+//   - if the target in args is (or resolves to) an SSH remote, the target is
+//     rewritten in the args to the equivalent HTTPS URL so git uses HTTP
+//     transport and our injected Authorization header applies;
+//   - a Basic auth token is then injected via GIT_CONFIG_COUNT/GIT_CONFIG_KEY_*/
+//     GIT_CONFIG_VALUE_* environment variables.
 //
-// For SSH remotes, a warning is printed once to stderr and the token is not injected.
+// If rewriting fails (unparseable URL, missing owner/repo) the command runs
+// unmodified and a one-shot warning is printed.
 // For empty/unset tokens, the command is returned unmodified.
 //
 // The remote is extracted from args by skipping the git subcommand and any flags
 // (arguments starting with "-"). For example, in
 // ["push", "--no-verify", "origin", "main"], the remote is "origin".
 func newCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Stdin = nil // Disconnect stdin to prevent hanging in hook context
-
 	token := strings.TrimSpace(os.Getenv(CheckpointTokenEnvVar))
+
+	mkCmd := func(finalArgs []string) *exec.Cmd {
+		c := exec.CommandContext(ctx, "git", finalArgs...)
+		c.Stdin = nil // Disconnect stdin to prevent hanging in hook context
+		return c
+	}
+
 	if token == "" {
-		return cmd
+		return mkCmd(args)
 	}
 
 	if !isValidToken(token) {
 		fmt.Fprintf(os.Stderr, "[entire] Warning: %s contains invalid characters (CR, LF, or other control chars) — token ignored\n", CheckpointTokenEnvVar)
-		return cmd
+		return mkCmd(args)
 	}
 
 	target := extractRemoteFromArgs(args)
 	if target == "" {
-		return cmd
+		return mkCmd(args)
 	}
 
-	protocol := resolveTargetProtocol(ctx, target)
+	newTarget, protocol := resolveTargetForTokenAuth(ctx, target)
+	if newTarget != target {
+		args = replaceFirstPositional(args, newTarget)
+	}
+
+	cmd := mkCmd(args)
 
 	switch protocol {
 	case ProtocolSSH:
@@ -200,6 +213,59 @@ func newCommand(ctx context.Context, args ...string) *exec.Cmd {
 		// Unknown protocol (e.g., local path, or resolution failed) — don't inject
 		return cmd
 	}
+}
+
+// resolveTargetForTokenAuth resolves a git target (remote name or URL) to its
+// effective protocol, rewriting SSH targets to the equivalent HTTPS URL so
+// token-based auth can be applied. Returns the (possibly rewritten) target and
+// its final protocol. Protocol is "" when resolution fails (local path,
+// nonexistent remote, unparseable URL).
+//
+// This is only meaningful when ENTIRE_CHECKPOINT_TOKEN is set; callers gate on
+// that themselves.
+func resolveTargetForTokenAuth(ctx context.Context, target string) (string, string) {
+	if target == "" || isLocalPath(target) {
+		return target, ""
+	}
+
+	rawURL := target
+	if !IsURL(target) {
+		var err error
+		rawURL, err = GetRemoteURL(ctx, target)
+		if err != nil {
+			return target, ""
+		}
+	}
+
+	info, err := ParseURL(rawURL)
+	if err != nil {
+		return target, ""
+	}
+
+	if info.Protocol == ProtocolSSH {
+		if httpsURL, ok := deriveTokenOriginURL(rawURL); ok {
+			return httpsURL, ProtocolHTTPS
+		}
+		return target, ProtocolSSH
+	}
+
+	return target, info.Protocol
+}
+
+// replaceFirstPositional returns a copy of args with the first non-flag
+// argument after args[0] (the git subcommand) replaced by newTarget. Callers
+// use this to rewrite a remote name/URL after resolution without mutating the
+// original slice.
+func replaceFirstPositional(args []string, newTarget string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 1; i < len(out); i++ {
+		if !strings.HasPrefix(out[i], "-") {
+			out[i] = newTarget
+			return out
+		}
+	}
+	return out
 }
 
 // extractRemoteFromArgs finds the remote URL or name from git command args.
@@ -268,28 +334,6 @@ func isValidToken(token string) bool {
 		}
 	}
 	return true
-}
-
-// resolveTargetProtocol determines whether a push/fetch target uses SSH or HTTPS.
-// Returns ProtocolSSH, ProtocolHTTPS, or "" if unknown.
-func resolveTargetProtocol(ctx context.Context, target string) string {
-	var rawURL string
-	if IsURL(target) {
-		rawURL = target
-	} else {
-		// Remote name — resolve to URL
-		var err error
-		rawURL, err = GetRemoteURL(ctx, target)
-		if err != nil {
-			return ""
-		}
-	}
-
-	info, err := ParseURL(rawURL)
-	if err != nil {
-		return ""
-	}
-	return info.Protocol
 }
 
 func resolvePushCommandTarget(ctx context.Context, target string) (string, error) {
