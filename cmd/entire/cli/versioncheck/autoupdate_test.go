@@ -52,6 +52,18 @@ func useBrewExecutable(t *testing.T) {
 	t.Cleanup(func() { executablePath = orig })
 }
 
+// assertManualHint checks that the "To update entire run:\n  <cmd>" hint
+// was printed when the prompt couldn't be shown.
+func assertManualHint(t *testing.T, out string) {
+	t.Helper()
+	if !strings.Contains(out, "To update entire run:") {
+		t.Errorf("missing manual-update hint: %q", out)
+	}
+	if !strings.Contains(out, "brew upgrade --cask entire") {
+		t.Errorf("manual hint missing installer command: %q", out)
+	}
+}
+
 func TestMaybeAutoUpdate_KillSwitch(t *testing.T) {
 	f := newAutoUpdateFixture(t)
 	useBrewExecutable(t)
@@ -63,6 +75,7 @@ func TestMaybeAutoUpdate_KillSwitch(t *testing.T) {
 	if f.installCalls != 0 {
 		t.Errorf("installer called with kill-switch set")
 	}
+	assertManualHint(t, buf.String())
 }
 
 func TestMaybeAutoUpdate_NoTTY(t *testing.T) {
@@ -76,6 +89,7 @@ func TestMaybeAutoUpdate_NoTTY(t *testing.T) {
 	if f.installCalls != 0 {
 		t.Errorf("installer called without TTY")
 	}
+	assertManualHint(t, buf.String())
 }
 
 func TestMaybeAutoUpdate_CIEnv(t *testing.T) {
@@ -91,6 +105,7 @@ func TestMaybeAutoUpdate_CIEnv(t *testing.T) {
 	if f.installCalls != 0 {
 		t.Errorf("installer called on CI (CI=true)")
 	}
+	assertManualHint(t, buf.String())
 }
 
 func TestMaybeAutoUpdate_UserDeclines(t *testing.T) {

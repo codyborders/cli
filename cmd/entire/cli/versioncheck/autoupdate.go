@@ -33,11 +33,13 @@ var (
 // is not invalidated on failure: we don't want to re-prompt on every
 // invocation while an upstream issue (network, auth, repo outage) is
 // still in place.
+//
+// When the prompt cannot be shown (kill switch set, or non-interactive
+// environment like CI / agent subprocess / no TTY) the installer
+// command is printed so the user still learns what to run manually.
 func MaybeAutoUpdate(ctx context.Context, w io.Writer, currentVersion string) {
-	if os.Getenv(envKillSwitch) != "" {
-		return
-	}
-	if !interactive.CanPromptInteractively() {
+	if os.Getenv(envKillSwitch) != "" || !interactive.CanPromptInteractively() {
+		fmt.Fprintf(w, "To update entire run:\n  %s\n", updateCommand(currentVersion))
 		return
 	}
 
