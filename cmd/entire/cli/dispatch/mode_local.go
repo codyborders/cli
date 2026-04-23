@@ -210,10 +210,6 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 	return candidates, nil
 }
 
-func reachableCheckpointIDsOnHEAD(ctx context.Context, repoRoot string, since time.Time) (map[string]struct{}, error) {
-	return reachableCheckpointIDsInRange(ctx, repoRoot, branchLocalRevRange(ctx, repoRoot), since)
-}
-
 func reachableCheckpointIDsInRange(ctx context.Context, repoRoot, revRange string, since time.Time) (map[string]struct{}, error) {
 	cmd := exec.CommandContext(
 		ctx,
@@ -254,8 +250,11 @@ func branchLocalRevRange(ctx context.Context, repoRoot string) string {
 }
 
 // defaultBranchRef resolves the repository's default branch, preferring
-// origin/HEAD and falling back to the conventional main/master names. Returns
-// an empty string if nothing matches so callers can skip the exclusion.
+// origin/HEAD and falling back to the conventional main/master names. A
+// candidate is only accepted if it is an ancestor of HEAD — otherwise a
+// repo with an unconventional default (e.g. develop, trunk) would silently
+// exclude the wrong history. Returns an empty string if nothing matches so
+// callers can skip the exclusion.
 func defaultBranchRef(ctx context.Context, repoRoot string) string {
 	if out, ok := runGitOutput(ctx, repoRoot, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); ok {
 		ref := strings.TrimSpace(out)
@@ -264,7 +263,10 @@ func defaultBranchRef(ctx context.Context, repoRoot string) string {
 		}
 	}
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		if _, ok := runGitOutput(ctx, repoRoot, "rev-parse", "--verify", "--quiet", candidate); ok {
+		if _, ok := runGitOutput(ctx, repoRoot, "rev-parse", "--verify", "--quiet", candidate); !ok {
+			continue
+		}
+		if _, ok := runGitOutput(ctx, repoRoot, "merge-base", "--is-ancestor", candidate, "HEAD"); ok {
 			return candidate
 		}
 	}

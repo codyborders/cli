@@ -70,7 +70,7 @@ Examples:
 	cmd.Flags().BoolVar(&flagLocal, "local", false, "use local LLM tokens instead of server synthesis")
 	cmd.Flags().StringVar(&flagSince, "since", "7d", "time window (Go duration, relative time, or ISO date)")
 	cmd.Flags().StringVar(&flagUntil, "until", "", "window end time (defaults to now)")
-	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include all local branches (--local only)")
+	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include every existing local branch (--local only; renamed or deleted branches are skipped)")
 	cmd.Flags().StringSliceVar(&flagRepos, "repos", nil, fmt.Sprintf("cloud repo slugs, up to %d (for example entireio/cli)", dispatchpkg.CloudRepoLimit))
 	cmd.Flags().StringVar(&flagVoice, "voice", "", "voice preset name or literal description")
 

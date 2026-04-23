@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -530,14 +531,69 @@ func TestLocalMode_AllBranchesRestrictsToLocalBranches(t *testing.T) {
 	}
 }
 
-func TestReachableCheckpointIDsOnHEAD_LimitsLogToWindowAndCheckpointTrailers(t *testing.T) {
+func TestDefaultBranchRef_RejectsStaleRefNotAncestorOfHEAD(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "a.txt", "x")
+	testutil.GitAdd(t, dir, "a.txt")
+	testutil.GitCommit(t, dir, "master commit")
+
+	// Create an orphan branch so master and develop share no history; master
+	// must not be accepted as a default-branch base for HEAD on develop.
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("checkout", "--orphan", "develop")
+	run("reset", "--hard")
+	testutil.WriteFile(t, dir, "b.txt", "y")
+	run("add", "b.txt")
+	run("commit", "--no-gpg-sign", "-m", "develop root commit")
+
+	got := defaultBranchRef(context.Background(), dir)
+	if got != "" {
+		t.Fatalf("expected defaultBranchRef to reject non-ancestor master, got %q", got)
+	}
+}
+
+func TestDefaultBranchRef_AcceptsAncestor(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "a.txt", "x")
+	testutil.GitAdd(t, dir, "a.txt")
+	testutil.GitCommit(t, dir, "master commit")
+
+	testutil.GitCheckoutNewBranch(t, dir, "feature")
+	testutil.WriteFile(t, dir, "b.txt", "y")
+	testutil.GitAdd(t, dir, "b.txt")
+	testutil.GitCommit(t, dir, "feature commit")
+
+	got := defaultBranchRef(context.Background(), dir)
+	if got != "master" {
+		t.Fatalf("expected defaultBranchRef to accept master as ancestor of feature, got %q", got)
+	}
+}
+
+func TestReachableCheckpointIDsInRange_LimitsLogToWindowAndCheckpointTrailers(t *testing.T) {
 	tmpDir := t.TempDir()
 	argsFile := filepath.Join(tmpDir, "git-args.txt")
 	gitPath := filepath.Join(tmpDir, "git")
 
+	// The shim only captures args from `git log` invocations; other
+	// subcommands (merge-base, symbolic-ref, rev-parse) are rejected so this
+	// test cannot accidentally collect args from an unrelated git call if
+	// future callers reorder resolution around the log.
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$TEST_GIT_ARGS_FILE\"\n" +
-		"printf 'subject\\n\\nEntire-Checkpoint: " + testCheckpointID + "\\000'\n"
+		"if [ \"$3\" = \"log\" ]; then\n" +
+		"  printf '%s\\n' \"$@\" > \"$TEST_GIT_ARGS_FILE\"\n" +
+		"  printf 'subject\\n\\nEntire-Checkpoint: " + testCheckpointID + "\\000'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 1\n"
 	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +602,7 @@ func TestReachableCheckpointIDsOnHEAD_LimitsLogToWindowAndCheckpointTrailers(t *
 	t.Setenv("TEST_GIT_ARGS_FILE", argsFile)
 
 	since := time.Date(2026, 4, 1, 12, 30, 0, 0, time.UTC)
-	reachable, err := reachableCheckpointIDsOnHEAD(context.Background(), "/tmp/repo", since)
+	reachable, err := reachableCheckpointIDsInRange(context.Background(), "/tmp/repo", "origin/main..HEAD", since)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,6 +620,9 @@ func TestReachableCheckpointIDsOnHEAD_LimitsLogToWindowAndCheckpointTrailers(t *
 	}
 	if !strings.Contains(args, "--since=2026-04-01T12:30:00Z") {
 		t.Fatalf("expected git log to bound history by since window, got args %q", args)
+	}
+	if !strings.Contains(args, "origin/main..HEAD") {
+		t.Fatalf("expected git log to use the supplied rev range, got args %q", args)
 	}
 }
 
