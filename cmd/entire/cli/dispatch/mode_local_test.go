@@ -560,6 +560,41 @@ func TestDefaultBranchRef_RejectsStaleRefNotAncestorOfHEAD(t *testing.T) {
 	}
 }
 
+func TestDefaultBranchRef_RejectsStaleOriginHEADNotAncestorOfHEAD(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "a.txt", "x")
+	testutil.GitAdd(t, dir, "a.txt")
+	testutil.GitCommit(t, dir, "master commit")
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Fake a remote so refs/remotes/origin/master can exist.
+	run("update-ref", "refs/remotes/origin/master", "HEAD")
+	run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+
+	// Move HEAD to a disjoint orphan branch. origin/HEAD still points at
+	// origin/master, which is no longer an ancestor of HEAD — the fast path
+	// must reject it instead of trusting the stale symbolic-ref target.
+	run("checkout", "--orphan", "develop")
+	run("reset", "--hard")
+	testutil.WriteFile(t, dir, "b.txt", "y")
+	run("add", "b.txt")
+	run("commit", "--no-gpg-sign", "-m", "develop root commit")
+
+	got := defaultBranchRef(context.Background(), dir)
+	if got != "" {
+		t.Fatalf("expected defaultBranchRef to reject stale origin/HEAD, got %q", got)
+	}
+}
+
 func TestDefaultBranchRef_AcceptsAncestor(t *testing.T) {
 	dir := t.TempDir()
 	testutil.InitRepo(t, dir)

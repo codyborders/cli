@@ -259,18 +259,26 @@ func defaultBranchRef(ctx context.Context, repoRoot string) string {
 	if out, ok := runGitOutput(ctx, repoRoot, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); ok {
 		ref := strings.TrimSpace(out)
 		if strings.HasPrefix(ref, "refs/remotes/") {
-			return strings.TrimPrefix(ref, "refs/remotes/")
+			candidate := strings.TrimPrefix(ref, "refs/remotes/")
+			if isAncestorOfHEAD(ctx, repoRoot, candidate) {
+				return candidate
+			}
 		}
 	}
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
 		if _, ok := runGitOutput(ctx, repoRoot, "rev-parse", "--verify", "--quiet", candidate); !ok {
 			continue
 		}
-		if _, ok := runGitOutput(ctx, repoRoot, "merge-base", "--is-ancestor", candidate, "HEAD"); ok {
+		if isAncestorOfHEAD(ctx, repoRoot, candidate) {
 			return candidate
 		}
 	}
 	return ""
+}
+
+func isAncestorOfHEAD(ctx context.Context, repoRoot, ref string) bool {
+	_, ok := runGitOutput(ctx, repoRoot, "merge-base", "--is-ancestor", ref, "HEAD")
+	return ok
 }
 
 func runGitOutput(ctx context.Context, repoRoot string, args ...string) (string, bool) {

@@ -12,6 +12,12 @@ import (
 	"github.com/go-git/go-git/v6"
 )
 
+// requireSecureDispatchURL is the secure-base-URL guard used before the cloud
+// client sends a bearer token. Tests swap it to allow httptest.NewServer
+// (http://127.0.0.1:...) endpoints; production always routes through
+// api.RequireSecureURL and rejects plain HTTP.
+var requireSecureDispatchURL = api.RequireSecureURL
+
 func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 	token, err := lookupCurrentToken()
 	if err != nil {
@@ -19,6 +25,11 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 	}
 	if token == "" {
 		return nil, errors.New("dispatch requires login — run `entire login`")
+	}
+
+	baseURL := api.BaseURL()
+	if err := requireSecureDispatchURL(baseURL); err != nil {
+		return nil, fmt.Errorf("dispatch base URL: %w", err)
 	}
 
 	now := nowUTC()
@@ -56,7 +67,7 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 		repos = []string{repoFullName}
 	}
 
-	cloud := NewCloudClient(CloudConfig{BaseURL: api.BaseURL(), Token: token})
+	cloud := NewCloudClient(CloudConfig{BaseURL: baseURL, Token: token})
 	reqBody := CreateDispatchRequest{
 		Repos:    repos,
 		Since:    normalizedSince.Format(time.RFC3339),

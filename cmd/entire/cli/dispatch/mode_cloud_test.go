@@ -5,11 +5,29 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/entireio/cli/cmd/entire/cli/api"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
 )
+
+// stubCloudDispatchAuth swaps the package-level auth/secure-URL hooks to
+// produce a test token and bypass the HTTPS guard so tests can talk to a
+// plain-HTTP httptest.NewServer. Tests that need to verify the HTTPS guard
+// itself should not call this helper.
+func stubCloudDispatchAuth(t *testing.T) {
+	t.Helper()
+	oldLookup := lookupCurrentToken
+	oldRequire := requireSecureDispatchURL
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
+	requireSecureDispatchURL = func(string) error { return nil }
+	t.Cleanup(func() {
+		lookupCurrentToken = oldLookup
+		requireSecureDispatchURL = oldRequire
+	})
+}
 
 func TestServerMode_HappyPath(t *testing.T) {
 	dir := t.TempDir()
@@ -72,14 +90,10 @@ func TestServerMode_HappyPath(t *testing.T) {
 	}))
 	defer mock.Close()
 
-	oldLookup := lookupCurrentToken
+	stubCloudDispatchAuth(t)
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
-	t.Cleanup(func() {
-		lookupCurrentToken = oldLookup
-		nowUTC = oldNow
-	})
+	t.Cleanup(func() { nowUTC = oldNow })
 
 	t.Setenv("ENTIRE_API_BASE_URL", mock.URL)
 	t.Chdir(dir)
@@ -147,14 +161,10 @@ func TestServerMode_ExplicitReposDoNotRequireCurrentRepo(t *testing.T) {
 	}))
 	defer mock.Close()
 
-	oldLookup := lookupCurrentToken
+	stubCloudDispatchAuth(t)
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
-	t.Cleanup(func() {
-		lookupCurrentToken = oldLookup
-		nowUTC = oldNow
-	})
+	t.Cleanup(func() { nowUTC = oldNow })
 
 	t.Setenv("ENTIRE_API_BASE_URL", mock.URL)
 
@@ -216,14 +226,10 @@ func TestServerMode_RequiresGeneratedMarkdown(t *testing.T) {
 	}))
 	defer mock.Close()
 
-	oldLookup := lookupCurrentToken
+	stubCloudDispatchAuth(t)
 	oldNow := nowUTC
-	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
 	nowUTC = func() time.Time { return time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC) }
-	t.Cleanup(func() {
-		lookupCurrentToken = oldLookup
-		nowUTC = oldNow
-	})
+	t.Cleanup(func() { nowUTC = oldNow })
 
 	t.Setenv("ENTIRE_API_BASE_URL", mock.URL)
 	t.Chdir(dir)
@@ -294,11 +300,7 @@ func TestServerMode_NormalizesWindowAndSanitizesVoice(t *testing.T) {
 	}))
 	defer mock.Close()
 
-	oldLookup := lookupCurrentToken
-	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
-	t.Cleanup(func() {
-		lookupCurrentToken = oldLookup
-	})
+	stubCloudDispatchAuth(t)
 
 	t.Setenv("ENTIRE_API_BASE_URL", mock.URL)
 
@@ -314,5 +316,30 @@ func TestServerMode_NormalizesWindowAndSanitizesVoice(t *testing.T) {
 	}
 	if got.GeneratedText != "Hello" {
 		t.Fatalf("unexpected generated text: %q", got.GeneratedText)
+	}
+}
+
+// TestServerMode_RejectsPlainHTTPBaseURL pins the production guarantee that
+// bearer tokens are never sent to an http:// base URL. It deliberately does
+// not call stubCloudDispatchAuth — the real requireSecureDispatchURL must
+// fire. If a future refactor drops the check, this test breaks before the
+// leak reaches users.
+func TestServerMode_RejectsPlainHTTPBaseURL(t *testing.T) {
+	oldLookup := lookupCurrentToken
+	lookupCurrentToken = func() (string, error) { return testCloudDispatchToken, nil }
+	t.Cleanup(func() { lookupCurrentToken = oldLookup })
+
+	t.Setenv("ENTIRE_API_BASE_URL", "http://dispatch.example.invalid")
+
+	_, err := Run(context.Background(), Options{
+		Mode:      ModeServer,
+		RepoPaths: []string{testRepoFullName},
+		Since:     "7d",
+	})
+	if err == nil {
+		t.Fatal("expected error when dispatch base URL is http://")
+	}
+	if !strings.Contains(err.Error(), api.ErrInsecureHTTP.Error()) {
+		t.Fatalf("expected ErrInsecureHTTP, got %v", err)
 	}
 }

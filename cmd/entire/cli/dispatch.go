@@ -29,9 +29,8 @@ func newDispatchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:    "dispatch",
-		Short:  "Generate a dispatch summarizing recent agent work",
-		Hidden: true,
+		Use:   "dispatch",
+		Short: "Generate a dispatch summarizing recent agent work",
 		Long: `Generate a dispatch summarizing recent agent work.
 
 Examples:
