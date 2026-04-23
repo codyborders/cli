@@ -1,8 +1,14 @@
 package cli
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	dispatchpkg "github.com/entireio/cli/cmd/entire/cli/dispatch"
@@ -338,6 +344,50 @@ func TestBuildDispatchRepoOptions_DedupesAndSorts(t *testing.T) {
 	options := buildDispatchRepoOptions([]string{"entireio/entire.io", "entireio/cli", "entireio/cli"})
 	if got := strings.Join(optionValues(options), ","); got != "entireio/cli,entireio/entire.io" {
 		t.Fatalf("unexpected repo options: %v", optionValues(options))
+	}
+}
+
+func TestDiscoverLocalRepoRoots_LimitsConcurrentResolution(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	currentRepo := filepath.Join(parent, "repo-0")
+	for i := range 12 {
+		repoDir := filepath.Join(parent, fmt.Sprintf("repo-%d", i))
+		if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldResolve := resolveDispatchWizardTopLevel
+	var mu sync.Mutex
+	current := 0
+	maxConcurrent := 0
+	resolveDispatchWizardTopLevel = func(_ context.Context, path string) (string, error) {
+		mu.Lock()
+		current++
+		if current > maxConcurrent {
+			maxConcurrent = current
+		}
+		mu.Unlock()
+
+		time.Sleep(20 * time.Millisecond)
+
+		mu.Lock()
+		current--
+		mu.Unlock()
+		return path, nil
+	}
+	t.Cleanup(func() {
+		resolveDispatchWizardTopLevel = oldResolve
+	})
+
+	roots := discoverLocalRepoRoots(context.Background(), currentRepo)
+	if len(roots) != 12 {
+		t.Fatalf("expected 12 repo roots, got %d", len(roots))
+	}
+	if maxConcurrent > dispatchWizardRepoDiscoveryConcurrencyLimit {
+		t.Fatalf("expected max concurrency <= %d, got %d", dispatchWizardRepoDiscoveryConcurrencyLimit, maxConcurrent)
 	}
 }
 

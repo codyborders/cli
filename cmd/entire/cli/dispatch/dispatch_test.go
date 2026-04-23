@@ -7,7 +7,11 @@ import (
 )
 
 func TestRun_ServerAllowsRepos(t *testing.T) {
-	t.Parallel()
+	oldLookup := lookupCurrentToken
+	lookupCurrentToken = func() (string, error) { return "", nil }
+	t.Cleanup(func() {
+		lookupCurrentToken = oldLookup
+	})
 
 	_, err := Run(context.Background(), Options{
 		Mode:      ModeServer,
@@ -21,5 +25,16 @@ func TestRun_ServerAllowsRepos(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "dispatch requires login") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMode_String(t *testing.T) {
+	t.Parallel()
+
+	if got := ModeServer.String(); got != "server" {
+		t.Fatalf("expected server string, got %q", got)
+	}
+	if got := ModeLocal.String(); got != "local" {
+		t.Fatalf("expected local string, got %q", got)
 	}
 }

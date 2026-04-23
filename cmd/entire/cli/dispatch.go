@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	dispatchpkg "github.com/entireio/cli/cmd/entire/cli/dispatch"
 	"github.com/spf13/cobra"
@@ -138,6 +137,7 @@ func parseDispatchFlags(
 	)
 }
 
+//nolint:wrapcheck // passthrough glue to keep CLI error text unchanged while option logic lives in dispatch package
 func resolveDispatchOptions(
 	flagLocal bool,
 	flagSince string,
@@ -148,65 +148,14 @@ func resolveDispatchOptions(
 	flagVoice string,
 	currentBranch func() (string, error),
 ) (dispatchpkg.Options, error) {
-	flagRepos = normalizeDispatchScopeValues(flagRepos)
-	flagOrgs = normalizeDispatchScopeValues(flagOrgs)
-	if len(flagOrgs) > 0 && len(flagRepos) > 0 {
-		return dispatchpkg.Options{}, errors.New("--org and --repos are mutually exclusive")
-	}
-	if flagLocal && len(flagRepos) > 0 {
-		return dispatchpkg.Options{}, errors.New("--repos cannot be used with --local")
-	}
-	if flagLocal && len(flagOrgs) > 0 {
-		return dispatchpkg.Options{}, errors.New("--org cannot be used with --local")
-	}
-
-	mode := dispatchpkg.ModeServer
-	if flagLocal {
-		mode = dispatchpkg.ModeLocal
-	}
-
-	var branches []string
-	allBranches := flagAllBranches
-	implicitCurrentBranch := false
-	switch {
-	case allBranches:
-	case len(flagRepos) > 0, len(flagOrgs) > 0:
-		branches = nil
-	default:
-		currentBranchName, branchErr := currentBranch()
-		if branchErr != nil {
-			return dispatchpkg.Options{}, branchErr
-		}
-		branches = []string{currentBranchName}
-		implicitCurrentBranch = true
-	}
-
-	return dispatchpkg.Options{
-		Mode:                  mode,
-		RepoPaths:             append([]string(nil), flagRepos...),
-		Orgs:                  append([]string(nil), flagOrgs...),
-		Since:                 flagSince,
-		Until:                 flagUntil,
-		Branches:              branches,
-		AllBranches:           allBranches,
-		ImplicitCurrentBranch: implicitCurrentBranch,
-		Voice:                 flagVoice,
-	}, nil
-}
-
-func normalizeDispatchScopeValues(values []string) []string {
-	normalized := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		normalized = append(normalized, value)
-	}
-	return normalized
+	return dispatchpkg.ResolveOptions(
+		flagLocal,
+		flagSince,
+		flagUntil,
+		flagAllBranches,
+		flagRepos,
+		flagOrgs,
+		flagVoice,
+		currentBranch,
+	)
 }

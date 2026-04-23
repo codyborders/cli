@@ -22,8 +22,11 @@ import (
 var errDispatchCancelled = errors.New("dispatch cancelled")
 var listDispatchWizardRepos = discoverAuthenticatedDispatchWizardRepos
 var listDispatchWizardOrgs = discoverAuthenticatedDispatchWizardOrgs
+var resolveDispatchWizardTopLevel = resolveGitTopLevel
 
 const (
+	dispatchWizardRepoDiscoveryConcurrencyLimit = 8
+
 	dispatchWizardModeLocal  = "local"
 	dispatchWizardModeServer = "server"
 
@@ -555,15 +558,18 @@ func discoverLocalRepoRoots(ctx context.Context, currentRepo string) []string {
 		}
 
 		resolved := make([]string, len(candidates))
+		sem := make(chan struct{}, dispatchWizardRepoDiscoveryConcurrencyLimit)
 		var wg sync.WaitGroup
 		wg.Add(len(candidates))
 		for i, candidate := range candidates {
-			go func() {
+			sem <- struct{}{}
+			go func(i int, candidate string) {
 				defer wg.Done()
-				if repoRoot, resolveErr := resolveGitTopLevel(ctx, candidate); resolveErr == nil {
+				defer func() { <-sem }()
+				if repoRoot, resolveErr := resolveDispatchWizardTopLevel(ctx, candidate); resolveErr == nil {
 					resolved[i] = repoRoot
 				}
-			}()
+			}(i, candidate)
 		}
 		wg.Wait()
 		for _, repoRoot := range resolved {

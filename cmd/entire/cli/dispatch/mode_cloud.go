@@ -34,7 +34,8 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !since.Before(until) {
+	normalizedSince, normalizedUntil := NormalizeWindow(since, until)
+	if !normalizedSince.Before(normalizedUntil) {
 		return nil, errors.New("--since must be before --until")
 	}
 
@@ -56,20 +57,16 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 		repos = []string{repoFullName}
 	}
 
-	branches := any(opts.Branches)
-	if opts.AllBranches {
-		branches = "all"
-	}
-
 	cloud := NewCloudClient(CloudConfig{BaseURL: api.BaseURL(), Token: token})
 	reqBody := CreateDispatchRequest{
-		Repos:    repos,
-		Orgs:     orgs,
-		Since:    since.Format(time.RFC3339),
-		Until:    until.Format(time.RFC3339),
-		Branches: branches,
-		Generate: true,
-		Voice:    opts.Voice,
+		Repos:       repos,
+		Orgs:        orgs,
+		Since:       normalizedSince.Format(time.RFC3339),
+		Until:       normalizedUntil.Format(time.RFC3339),
+		Branches:    append([]string(nil), opts.Branches...),
+		AllBranches: opts.AllBranches,
+		Generate:    true,
+		Voice:       resolvedDispatchVoicePreference(opts.Voice),
 	}
 	response, err := cloud.CreateDispatch(ctx, reqBody)
 	if err != nil {

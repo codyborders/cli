@@ -1,6 +1,9 @@
 package dispatch
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type Mode int
 
@@ -8,6 +11,17 @@ const (
 	ModeServer Mode = iota
 	ModeLocal
 )
+
+func (m Mode) String() string {
+	switch m {
+	case ModeServer:
+		return "server"
+	case ModeLocal:
+		return "local"
+	default:
+		return fmt.Sprintf("Mode(%d)", m)
+	}
+}
 
 type Options struct {
 	Mode                  Mode

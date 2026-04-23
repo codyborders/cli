@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -67,10 +68,10 @@ Requirements:
 - Do not add separate metadata summary lines beneath the title.`
 
 type dispatchPromptWindow struct {
-	NormalizedSince          string  `json:"normalized_since"`
-	NormalizedUntil          string  `json:"normalized_until"`
-	FirstCheckpointCreatedAt *string `json:"first_checkpoint_created_at"`
-	LastCheckpointCreatedAt  *string `json:"last_checkpoint_created_at"`
+	NormalizedSince          string `json:"normalized_since"`
+	NormalizedUntil          string `json:"normalized_until"`
+	FirstCheckpointCreatedAt string `json:"first_checkpoint_created_at,omitempty"`
+	LastCheckpointCreatedAt  string `json:"last_checkpoint_created_at,omitempty"`
 }
 
 type dispatchPromptBullet struct {
@@ -101,6 +102,8 @@ type dispatchPromptPayload struct {
 	Repos        []dispatchPromptRepo `json:"repos"`
 }
 
+var dispatchPromptTagPattern = regexp.MustCompile(`(?i)<\s*/?\s*(dispatch_data|voice_preference)\b`)
+
 func buildDispatchPrompt(dispatch *Dispatch, voice string) (string, error) {
 	if dispatch == nil {
 		dispatch = &Dispatch{}
@@ -111,10 +114,7 @@ func buildDispatchPrompt(dispatch *Dispatch, voice string) (string, error) {
 		return "", fmt.Errorf("marshal dispatch prompt payload: %w", err)
 	}
 
-	sanitizedVoice := sanitizeDispatchVoice(ResolveVoice(voice).Text)
-	if sanitizedVoice == "" {
-		sanitizedVoice = "neutral"
-	}
+	sanitizedVoice := resolvedDispatchVoicePreference(voice)
 
 	return fmt.Sprintf(`%s
 
@@ -135,8 +135,8 @@ func marshalDispatchPromptPayload(dispatch *Dispatch, voice string) (string, err
 	payload := dispatchPromptPayload{
 		Title:        summarizeLocalDispatchTitle(dispatch.CoveredRepos),
 		CoveredRepos: append([]string(nil), dispatch.CoveredRepos...),
-		Branches:     dispatchBranches(dispatch),
-		Voice:        sanitizeDispatchVoice(ResolveVoice(voice).Text),
+		Branches:     make([]string, 0),
+		Voice:        resolvedDispatchVoicePreference(voice),
 		Window: dispatchPromptWindow{
 			NormalizedSince:          formatDispatchTime(dispatch.Window.NormalizedSince),
 			NormalizedUntil:          formatDispatchTime(dispatch.Window.NormalizedUntil),
@@ -145,10 +145,7 @@ func marshalDispatchPromptPayload(dispatch *Dispatch, voice string) (string, err
 		},
 		Repos: make([]dispatchPromptRepo, 0, len(dispatch.Repos)),
 	}
-	if payload.Voice == "" {
-		payload.Voice = "neutral"
-	}
-
+	seenBranches := map[string]struct{}{}
 	for _, repo := range dispatch.Repos {
 		outRepo := dispatchPromptRepo{
 			FullName: repo.FullName,
@@ -160,6 +157,13 @@ func marshalDispatchPromptPayload(dispatch *Dispatch, voice string) (string, err
 				Bullets: make([]dispatchPromptBullet, 0, len(section.Bullets)),
 			}
 			for _, bullet := range section.Bullets {
+				branch := strings.TrimSpace(bullet.Branch)
+				if branch != "" {
+					if _, ok := seenBranches[branch]; !ok {
+						seenBranches[branch] = struct{}{}
+						payload.Branches = append(payload.Branches, branch)
+					}
+				}
 				outSection.Bullets = append(outSection.Bullets, dispatchPromptBullet{
 					CheckpointID: bullet.CheckpointID,
 					Text:         bullet.Text,
@@ -182,16 +186,15 @@ func marshalDispatchPromptPayload(dispatch *Dispatch, voice string) (string, err
 }
 
 func escapeDispatchPrompt(text string) string {
-	return strings.NewReplacer(
-		"</dispatch_data", "&lt;/dispatch_data",
-		"<dispatch_data", "&lt;dispatch_data",
-		"</voice_preference", "&lt;/voice_preference",
-		"<voice_preference", "&lt;voice_preference",
-	).Replace(text)
+	return dispatchPromptTagPattern.ReplaceAllStringFunc(text, func(match string) string {
+		return strings.Replace(match, "<", "&lt;", 1)
+	})
 }
 
 func sanitizeDispatchVoice(raw string) string {
-	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
 		switch {
 		case (r >= 0 && r <= 8) || r == 11 || r == 12 || (r >= 14 && r <= 31) || r == 127:
 			return -1
@@ -200,7 +203,15 @@ func sanitizeDispatchVoice(raw string) string {
 		default:
 			return r
 		}
-	}, raw)), " ")
+	}, normalized))
+}
+
+func resolvedDispatchVoicePreference(voice string) string {
+	sanitized := sanitizeDispatchVoice(ResolveVoice(voice).Text)
+	if sanitized == "" {
+		return "neutral"
+	}
+	return sanitized
 }
 
 func summarizeLocalDispatchTitle(coveredRepos []string) string {
@@ -212,27 +223,6 @@ func summarizeLocalDispatchTitle(coveredRepos []string) string {
 	}
 }
 
-func dispatchBranches(dispatch *Dispatch) []string {
-	seen := map[string]struct{}{}
-	branches := make([]string, 0)
-	for _, repo := range dispatch.Repos {
-		for _, section := range repo.Sections {
-			for _, bullet := range section.Bullets {
-				branch := strings.TrimSpace(bullet.Branch)
-				if branch == "" {
-					continue
-				}
-				if _, ok := seen[branch]; ok {
-					continue
-				}
-				seen[branch] = struct{}{}
-				branches = append(branches, branch)
-			}
-		}
-	}
-	return branches
-}
-
 func formatDispatchTime(value time.Time) string {
 	if value.IsZero() {
 		return ""
@@ -240,10 +230,9 @@ func formatDispatchTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339)
 }
 
-func formatOptionalDispatchTime(value time.Time) *string {
+func formatOptionalDispatchTime(value time.Time) string {
 	if value.IsZero() {
-		return nil
+		return ""
 	}
-	formatted := formatDispatchTime(value)
-	return &formatted
+	return formatDispatchTime(value)
 }
