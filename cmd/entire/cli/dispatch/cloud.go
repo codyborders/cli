@@ -55,14 +55,11 @@ func NewCloudClient(cfg CloudConfig) *CloudClient {
 }
 
 type CreateDispatchRequest struct {
-	Repos       []string `json:"repos,omitempty"`
-	Orgs        []string `json:"orgs,omitempty"`
-	Since       string   `json:"since"`
-	Until       string   `json:"until"`
-	Branches    []string `json:"-"`
-	AllBranches bool     `json:"-"`
-	Generate    bool     `json:"generate"`
-	Voice       string   `json:"voice,omitempty"`
+	Repos    []string `json:"repos,omitempty"`
+	Since    string   `json:"since"`
+	Until    string   `json:"until"`
+	Generate bool     `json:"generate"`
+	Voice    string   `json:"voice,omitempty"`
 }
 
 type CreateDispatchResponse struct {
@@ -154,37 +151,6 @@ func (c *CloudClient) CreateDispatch(ctx context.Context, reqBody CreateDispatch
 		return nil, err
 	}
 	return &out, nil
-}
-
-func (r CreateDispatchRequest) MarshalJSON() ([]byte, error) {
-	type requestPayload struct {
-		Repos    []string `json:"repos,omitempty"`
-		Orgs     []string `json:"orgs,omitempty"`
-		Since    string   `json:"since"`
-		Until    string   `json:"until"`
-		Branches any      `json:"branches"`
-		Generate bool     `json:"generate"`
-		Voice    string   `json:"voice,omitempty"`
-	}
-
-	branches := any(r.Branches)
-	if r.AllBranches {
-		branches = "all"
-	}
-
-	data, err := json.Marshal(requestPayload{
-		Repos:    r.Repos,
-		Orgs:     r.Orgs,
-		Since:    r.Since,
-		Until:    r.Until,
-		Branches: branches,
-		Generate: r.Generate,
-		Voice:    r.Voice,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal dispatch request: %w", err)
-	}
-	return data, nil
 }
 
 func (c *CloudClient) doJSON(ctx context.Context, method, path string, reqBody, out any) error {

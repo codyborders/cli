@@ -337,24 +337,17 @@ func stringPtr(v string) *string {
 
 func dispatchStatusDetails(opts dispatchpkg.Options) []string {
 	scope := "Scope: current repo"
-	switch {
-	case len(opts.Orgs) == 1:
-		scope = "Scope: org/" + opts.Orgs[0]
-	case len(opts.Orgs) > 1:
-		scope = "Scope: orgs/" + strings.Join(opts.Orgs, ", ")
-	case len(opts.RepoPaths) > 0:
+	if len(opts.RepoPaths) > 0 {
 		scope = "Scope: " + strings.Join(opts.RepoPaths, ", ")
 	}
 
-	branches := "Branches: current branch"
+	var branches string
 	switch {
 	case opts.AllBranches:
-		branches = "Branches: all"
+		branches = "Branches: all local branches"
 	case opts.Mode == dispatchpkg.ModeLocal:
 		branches = "Branches: current branch"
-	case len(opts.Branches) > 0:
-		branches = "Branches: " + strings.Join(opts.Branches, ", ")
-	case len(opts.Orgs) > 0 || len(opts.RepoPaths) > 0:
+	default:
 		branches = "Branches: default branches"
 	}
 

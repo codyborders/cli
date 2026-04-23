@@ -17,6 +17,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/search"
 	"github.com/entireio/cli/cmd/entire/cli/trailers"
 	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -26,10 +27,6 @@ var (
 )
 
 func runLocal(ctx context.Context, opts Options) (*Dispatch, error) {
-	if len(opts.Orgs) > 0 {
-		return nil, errors.New("--org cannot be used with --local")
-	}
-
 	now := nowUTC()
 	sinceInput := strings.TrimSpace(opts.Since)
 	if sinceInput == "" {
@@ -138,7 +135,13 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 	}
 
 	branches := opts.Branches
-	if len(branches) == 0 && !opts.AllBranches {
+	switch {
+	case opts.AllBranches:
+		branches, err = localBranchNames(repo)
+		if err != nil {
+			return nil, err
+		}
+	case len(branches) == 0:
 		currentBranch, err := currentBranchName(repo)
 		if err != nil {
 			return nil, err
@@ -151,7 +154,7 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 	}
 	reachableCheckpointIDs := map[string]struct{}{}
 	if opts.ImplicitCurrentBranch && !opts.AllBranches {
-		reachableCheckpointIDs, err = reachableCheckpointIDsOnHEAD(ctx, repoRoot, since)
+		reachableCheckpointIDs, err = reachableCheckpointIDsInRange(ctx, repoRoot, branchLocalRevRange(ctx, repoRoot), since)
 		if err != nil {
 			return nil, err
 		}
@@ -173,15 +176,12 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 		if err != nil || summary == nil {
 			continue
 		}
-		if !opts.AllBranches {
-			_, onSelectedBranch := branchSet[summary.Branch]
-			if !onSelectedBranch {
-				if !opts.ImplicitCurrentBranch {
-					continue
-				}
-				if _, reachable := reachableCheckpointIDs[info.CheckpointID.String()]; !reachable {
-					continue
-				}
+		if _, onSelectedBranch := branchSet[summary.Branch]; !onSelectedBranch {
+			if !opts.ImplicitCurrentBranch {
+				continue
+			}
+			if _, reachable := reachableCheckpointIDs[info.CheckpointID.String()]; !reachable {
+				continue
 			}
 		}
 
@@ -211,13 +211,17 @@ func enumerateRepoCandidates(ctx context.Context, repoRoot string, opts Options,
 }
 
 func reachableCheckpointIDsOnHEAD(ctx context.Context, repoRoot string, since time.Time) (map[string]struct{}, error) {
+	return reachableCheckpointIDsInRange(ctx, repoRoot, branchLocalRevRange(ctx, repoRoot), since)
+}
+
+func reachableCheckpointIDsInRange(ctx context.Context, repoRoot, revRange string, since time.Time) (map[string]struct{}, error) {
 	cmd := exec.CommandContext(
 		ctx,
 		"git",
 		"-C",
 		repoRoot,
 		"log",
-		branchLocalRevRange(ctx, repoRoot),
+		revRange,
 		"--since="+since.UTC().Format(time.RFC3339),
 		"--grep",
 		"Entire-Checkpoint:",
@@ -301,6 +305,30 @@ func currentBranchName(repo *git.Repository) (string, error) {
 		return "", errors.New("not on a branch (detached HEAD)")
 	}
 	return head.Name().Short(), nil
+}
+
+// localBranchNames returns the short names of the user's local branches,
+// omitting the reserved "entire/" namespace used for internal refs.
+func localBranchNames(repo *git.Repository) ([]string, error) {
+	iter, err := repo.Branches()
+	if err != nil {
+		return nil, fmt.Errorf("list local branches: %w", err)
+	}
+	defer iter.Close()
+
+	var names []string
+	if err := iter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+		if strings.HasPrefix(name, checkpoint.ShadowBranchPrefix) {
+			return nil
+		}
+		names = append(names, name)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("iterate local branches: %w", err)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func findCommitSubjectByCheckpoint(ctx context.Context, repoRoot string, checkpointID checkpointid.CheckpointID) (string, error) {

@@ -11,30 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestParseDispatchFlags_OrgDefaultsToAllBranches(t *testing.T) {
-	t.Parallel()
-
-	opts, err := parseDispatchFlags(
-		&cobra.Command{},
-		false,
-		"7d",
-		"",
-		false,
-		nil,
-		[]string{"entireio"},
-		"",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts.AllBranches {
-		t.Fatal("did not expect org mode without --all-branches to default to all branches")
-	}
-	if opts.Branches != nil {
-		t.Fatalf("expected nil branches, got %v", opts.Branches)
-	}
-}
-
 func TestParseDispatchFlags_ServerReposAreAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -45,7 +21,6 @@ func TestParseDispatchFlags_ServerReposAreAllowed(t *testing.T) {
 		"",
 		false,
 		[]string{"entireio/cli", "entireio/entire.io"},
-		nil,
 		"",
 	)
 	if err != nil {
@@ -58,10 +33,10 @@ func TestParseDispatchFlags_ServerReposAreAllowed(t *testing.T) {
 		t.Fatalf("expected server mode, got %v", opts.Mode)
 	}
 	if opts.Branches != nil {
-		t.Fatalf("expected nil branches for server repo default-branch mode, got %v", opts.Branches)
+		t.Fatalf("expected nil branches for cloud default-branch mode, got %v", opts.Branches)
 	}
 	if opts.AllBranches {
-		t.Fatal("did not expect all branches for server repo default-branch mode")
+		t.Fatal("did not expect all branches for cloud default-branch mode")
 	}
 }
 
@@ -75,7 +50,6 @@ func TestParseDispatchFlags_NormalizesRepoScopeValues(t *testing.T) {
 		"",
 		false,
 		[]string{" entireio/cli ", "", "entireio/cli", " otherco/service ", "   "},
-		nil,
 		"",
 	)
 	if err != nil {
@@ -99,7 +73,6 @@ func TestParseDispatchFlags_LocalRejectsRepos(t *testing.T) {
 		"",
 		false,
 		[]string{"entireio/cli"},
-		nil,
 		"",
 	)
 	if err == nil {
@@ -110,61 +83,56 @@ func TestParseDispatchFlags_LocalRejectsRepos(t *testing.T) {
 	}
 }
 
-func TestParseDispatchFlags_LocalRejectsOrg(t *testing.T) {
+func TestParseDispatchFlags_CloudRejectsAllBranches(t *testing.T) {
 	t.Parallel()
 
 	_, err := parseDispatchFlags(
 		&cobra.Command{},
-		true,
+		false,
 		"7d",
 		"",
-		false,
-		nil,
-		[]string{"entireio"},
+		true,
+		[]string{"entireio/cli"},
 		"",
 	)
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error for --all-branches in cloud mode")
 	}
-	if err.Error() != "--org cannot be used with --local" {
+	if !strings.Contains(err.Error(), "--all-branches only applies to --local") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestParseDispatchFlags_MultipleOrgsAreAllowed(t *testing.T) {
+func TestParseDispatchFlags_CloudCapsReposAtFive(t *testing.T) {
 	t.Parallel()
 
-	opts, err := parseDispatchFlags(
+	repos := []string{"a/b", "c/d", "e/f", "g/h", "i/j", "k/l"}
+	_, err := parseDispatchFlags(
 		&cobra.Command{},
 		false,
 		"7d",
 		"",
 		false,
-		nil,
-		[]string{"entireio", "otherco"},
+		repos,
 		"",
 	)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for too many repos")
 	}
-	if got := strings.Join(opts.Orgs, ","); got != "entireio,otherco" {
-		t.Fatalf("expected multi-org scope to propagate, got %q", got)
-	}
-	if opts.Branches != nil {
-		t.Fatalf("expected nil branches for org scope, got %v", opts.Branches)
+	if !strings.Contains(err.Error(), "supports at most 5") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestParseDispatchFlags_AllBranchesFlag(t *testing.T) {
+func TestParseDispatchFlags_LocalAllBranchesFlag(t *testing.T) {
 	t.Parallel()
 
 	opts, err := parseDispatchFlags(
 		&cobra.Command{},
-		false,
+		true,
 		"7d",
 		"",
 		true,
-		nil,
 		nil,
 		"",
 	)

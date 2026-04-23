@@ -26,7 +26,6 @@ func (m Mode) String() string {
 type Options struct {
 	Mode                  Mode
 	RepoPaths             []string
-	Orgs                  []string
 	Since                 string
 	Until                 string
 	Branches              []string
@@ -34,6 +33,9 @@ type Options struct {
 	ImplicitCurrentBranch bool
 	Voice                 string
 }
+
+// CloudRepoLimit caps how many repos the cloud mode may query in one request.
+const CloudRepoLimit = 5
 
 func Run(ctx context.Context, opts Options) (*Dispatch, error) {
 	if opts.Mode == ModeServer {

@@ -40,8 +40,7 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 	}
 
 	repos := append([]string(nil), opts.RepoPaths...)
-	orgs := append([]string(nil), opts.Orgs...)
-	if len(orgs) == 0 && len(repos) == 0 {
+	if len(repos) == 0 {
 		repoRoot, err := paths.WorktreeRoot(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("not in a git repository: %w", err)
@@ -59,14 +58,11 @@ func runServer(ctx context.Context, opts Options) (*Dispatch, error) {
 
 	cloud := NewCloudClient(CloudConfig{BaseURL: api.BaseURL(), Token: token})
 	reqBody := CreateDispatchRequest{
-		Repos:       repos,
-		Orgs:        orgs,
-		Since:       normalizedSince.Format(time.RFC3339),
-		Until:       normalizedUntil.Format(time.RFC3339),
-		Branches:    append([]string(nil), opts.Branches...),
-		AllBranches: opts.AllBranches,
-		Generate:    true,
-		Voice:       resolvedDispatchVoicePreference(opts.Voice),
+		Repos:    repos,
+		Since:    normalizedSince.Format(time.RFC3339),
+		Until:    normalizedUntil.Format(time.RFC3339),
+		Generate: true,
+		Voice:    resolvedDispatchVoicePreference(opts.Voice),
 	}
 	response, err := cloud.CreateDispatch(ctx, reqBody)
 	if err != nil {

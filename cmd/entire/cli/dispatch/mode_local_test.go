@@ -107,19 +107,6 @@ func TestLocalMode_UsesUntilWindow(t *testing.T) {
 	}
 }
 
-func TestLocalMode_RejectsOrgScope(t *testing.T) {
-	_, err := Run(context.Background(), Options{
-		Mode: ModeLocal,
-		Orgs: []string{"entireio"},
-	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if err.Error() != "--org cannot be used with --local" {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestLocalMode_FallsBackToCommitSubjectWhenSummaryMissing(t *testing.T) {
 	dir := t.TempDir()
 	stubGeneratedLocalDispatch(t)
@@ -485,6 +472,59 @@ func TestLocalMode_ImplicitCurrentBranchExcludesDefaultBranchHistory(t *testing.
 		for _, bullet := range section.Bullets {
 			if strings.Contains(bullet.Text, "pre-branch work on main") {
 				t.Fatalf("default-branch checkpoint leaked into feature-branch dispatch: %+v", bullet)
+			}
+		}
+	}
+}
+
+func TestLocalMode_AllBranchesRestrictsToLocalBranches(t *testing.T) {
+	dir := t.TempDir()
+	stubGeneratedLocalDispatch(t)
+	testutil.InitRepo(t, dir)
+	testutil.WriteFile(t, dir, "a.txt", "x")
+	testutil.GitAdd(t, dir, "a.txt")
+	testutil.GitCommit(t, dir, "initial")
+	addOriginRemote(t, dir)
+
+	testutil.GitCheckoutNewBranch(t, dir, "feature-a")
+
+	createdAt := time.Now().UTC()
+	seedCommittedCheckpoint(t, dir, seededCheckpoint{
+		id:           testCheckpointID,
+		branch:       "feature-a",
+		createdAt:    createdAt,
+		filesTouched: []string{"a.txt"},
+		outcome:      testLocalFallbackText,
+	})
+	seedCommittedCheckpoint(t, dir, seededCheckpoint{
+		id:           "00ccccccccdd",
+		branch:       "deleted-branch",
+		createdAt:    createdAt,
+		filesTouched: []string{"a.txt"},
+		outcome:      "should not appear — branch no longer exists locally",
+	})
+
+	oldNow := nowUTC
+	nowUTC = func() time.Time { return createdAt.Add(time.Hour) }
+	t.Cleanup(func() { nowUTC = oldNow })
+
+	t.Chdir(dir)
+
+	got, err := Run(context.Background(), Options{
+		Mode:        ModeLocal,
+		Since:       "7d",
+		AllBranches: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Repos) != 1 {
+		t.Fatalf("expected 1 repo group, got %d", len(got.Repos))
+	}
+	for _, section := range got.Repos[0].Sections {
+		for _, bullet := range section.Bullets {
+			if strings.Contains(bullet.Text, "should not appear") {
+				t.Fatalf("checkpoint for non-local branch leaked into --all-branches dispatch: %+v", bullet)
 			}
 		}
 	}

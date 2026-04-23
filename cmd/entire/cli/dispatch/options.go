@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -11,20 +12,19 @@ func ResolveOptions(
 	flagUntil string,
 	flagAllBranches bool,
 	flagRepos []string,
-	flagOrgs []string,
 	flagVoice string,
 	currentBranch func() (string, error),
 ) (Options, error) {
 	flagRepos = normalizeScopeValues(flagRepos)
-	flagOrgs = normalizeScopeValues(flagOrgs)
-	if len(flagOrgs) > 0 && len(flagRepos) > 0 {
-		return Options{}, errors.New("--org and --repos are mutually exclusive")
-	}
+
 	if flagLocal && len(flagRepos) > 0 {
 		return Options{}, errors.New("--repos cannot be used with --local")
 	}
-	if flagLocal && len(flagOrgs) > 0 {
-		return Options{}, errors.New("--org cannot be used with --local")
+	if !flagLocal && flagAllBranches {
+		return Options{}, errors.New("--all-branches only applies to --local (cloud dispatch uses each repo's default branch)")
+	}
+	if !flagLocal && len(flagRepos) > CloudRepoLimit {
+		return Options{}, fmt.Errorf("--repos supports at most %d repos per dispatch", CloudRepoLimit)
 	}
 
 	mode := ModeServer
@@ -33,13 +33,8 @@ func ResolveOptions(
 	}
 
 	var branches []string
-	allBranches := flagAllBranches
 	implicitCurrentBranch := false
-	switch {
-	case allBranches:
-	case len(flagRepos) > 0, len(flagOrgs) > 0:
-		branches = nil
-	default:
+	if flagLocal && !flagAllBranches {
 		currentBranchName, err := currentBranch()
 		if err != nil {
 			return Options{}, err
@@ -51,11 +46,10 @@ func ResolveOptions(
 	return Options{
 		Mode:                  mode,
 		RepoPaths:             flagRepos,
-		Orgs:                  flagOrgs,
 		Since:                 flagSince,
 		Until:                 flagUntil,
 		Branches:              branches,
-		AllBranches:           allBranches,
+		AllBranches:           flagAllBranches,
 		ImplicitCurrentBranch: implicitCurrentBranch,
 		Voice:                 flagVoice,
 	}, nil

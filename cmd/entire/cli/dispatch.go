@@ -25,7 +25,6 @@ func newDispatchCmd() *cobra.Command {
 		flagUntil       string
 		flagAllBranches bool
 		flagRepos       []string
-		flagOrgs        []string
 		flagVoice       string
 	)
 
@@ -37,8 +36,8 @@ func newDispatchCmd() *cobra.Command {
 
 Examples:
   entire dispatch
-  entire dispatch --since 14d --all-branches
-  entire dispatch --local
+  entire dispatch --local --all-branches
+  entire dispatch --repos entireio/cli
   entire dispatch --voice neutral`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var (
@@ -49,7 +48,7 @@ Examples:
 			if shouldRunDispatchWizard(cmd.Flags().NFlag(), isTerminalStdin(os.Stdin), isTerminalWriter(cmd.OutOrStdout())) {
 				opts, err = runDispatchWizard(cmd)
 			} else {
-				opts, err = parseDispatchFlags(cmd, flagLocal, flagSince, flagUntil, flagAllBranches, flagRepos, flagOrgs, flagVoice)
+				opts, err = parseDispatchFlags(cmd, flagLocal, flagSince, flagUntil, flagAllBranches, flagRepos, flagVoice)
 			}
 			if err != nil {
 				if errors.Is(err, errDispatchCancelled) {
@@ -71,9 +70,8 @@ Examples:
 	cmd.Flags().BoolVar(&flagLocal, "local", false, "use local LLM tokens instead of server synthesis")
 	cmd.Flags().StringVar(&flagSince, "since", "7d", "time window (Go duration, relative time, or ISO date)")
 	cmd.Flags().StringVar(&flagUntil, "until", "", "window end time (defaults to now)")
-	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include all branches instead of the default branch scope")
-	cmd.Flags().StringSliceVar(&flagRepos, "repos", nil, "server repo slugs (for example entireio/cli)")
-	cmd.Flags().StringSliceVar(&flagOrgs, "org", nil, "enumerate checkpoints across one or more orgs")
+	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include all local branches (--local only)")
+	cmd.Flags().StringSliceVar(&flagRepos, "repos", nil, fmt.Sprintf("cloud repo slugs, up to %d (for example entireio/cli)", dispatchpkg.CloudRepoLimit))
 	cmd.Flags().StringVar(&flagVoice, "voice", "", "voice preset name or literal description")
 
 	return cmd
@@ -120,7 +118,6 @@ func parseDispatchFlags(
 	flagUntil string,
 	flagAllBranches bool,
 	flagRepos []string,
-	flagOrgs []string,
 	flagVoice string,
 ) (dispatchpkg.Options, error) {
 	return resolveDispatchOptions(
@@ -129,7 +126,6 @@ func parseDispatchFlags(
 		flagUntil,
 		flagAllBranches,
 		flagRepos,
-		flagOrgs,
 		flagVoice,
 		func() (string, error) {
 			return GetCurrentBranch(cmd.Context())
@@ -144,7 +140,6 @@ func resolveDispatchOptions(
 	flagUntil string,
 	flagAllBranches bool,
 	flagRepos []string,
-	flagOrgs []string,
 	flagVoice string,
 	currentBranch func() (string, error),
 ) (dispatchpkg.Options, error) {
@@ -154,7 +149,6 @@ func resolveDispatchOptions(
 		flagUntil,
 		flagAllBranches,
 		flagRepos,
-		flagOrgs,
 		flagVoice,
 		currentBranch,
 	)

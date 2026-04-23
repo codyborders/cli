@@ -53,11 +53,10 @@ func TestCloudClient_CreateDispatch_Happy(t *testing.T) {
 
 	client := NewCloudClient(CloudConfig{BaseURL: srv.URL, Token: "t"})
 	got, err := client.CreateDispatch(ctx, CreateDispatchRequest{
-		Repos:       []string{"entireio/cli"},
-		Since:       "2026-04-09T00:00:00Z",
-		Until:       "2026-04-16T00:00:00Z",
-		AllBranches: true,
-		Generate:    true,
+		Repos:    []string{"entireio/cli"},
+		Since:    "2026-04-09T00:00:00Z",
+		Until:    "2026-04-16T00:00:00Z",
+		Generate: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -67,47 +66,37 @@ func TestCloudClient_CreateDispatch_Happy(t *testing.T) {
 	}
 }
 
-func TestCloudClient_CreateDispatch_MultipleOrgs(t *testing.T) {
+func TestCloudClient_CreateDispatch_OmitsBranchesAndOrgsFromPayload(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/dispatches/generate" {
-			http.NotFound(w, r)
-			return
-		}
-
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		orgs, ok := body["orgs"].([]any)
-		if !ok || len(orgs) != 2 || orgs[0] != "entireio" || orgs[1] != "otherco" {
-			t.Fatalf("bad orgs payload: %v", body["orgs"])
+		if _, ok := body["orgs"]; ok {
+			t.Fatalf("did not expect orgs in payload: %v", body)
 		}
-		if _, ok := body["repos"]; ok {
-			t.Fatalf("did not expect repos payload: %v", body)
+		if _, ok := body["branches"]; ok {
+			t.Fatalf("did not expect branches in payload: %v", body)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"window":{"normalized_since":"2026-04-09T00:00:00Z","normalized_until":"2026-04-16T00:00:00Z"},"covered_repos":["entireio/cli","otherco/service"],"repos":[],"generated_markdown":"hi"}`)) //nolint:errcheck // test fixture response
+		_, _ = w.Write([]byte(`{"window":{"normalized_since":"2026-04-09T00:00:00Z","normalized_until":"2026-04-16T00:00:00Z"},"covered_repos":["entireio/cli"],"repos":[],"generated_markdown":"hi"}`)) //nolint:errcheck // test fixture response
 	}))
 	defer srv.Close()
 
 	client := NewCloudClient(CloudConfig{BaseURL: srv.URL, Token: "t"})
-	got, err := client.CreateDispatch(ctx, CreateDispatchRequest{
-		Orgs:     []string{"entireio", "otherco"},
+	_, err := client.CreateDispatch(ctx, CreateDispatchRequest{
+		Repos:    []string{"entireio/cli"},
 		Since:    "2026-04-09T00:00:00Z",
 		Until:    "2026-04-16T00:00:00Z",
-		Branches: []string{},
 		Generate: true,
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got.GeneratedMarkdown != "hi" {
-		t.Fatalf("bad generated markdown: %q", got.GeneratedMarkdown)
 	}
 }
 
@@ -194,7 +183,6 @@ func TestCloudClient_CreateDispatch_IgnoresUnknownResponseFields(t *testing.T) {
 		Repos:    []string{"entireio/cli"},
 		Since:    "2026-04-09T00:00:00Z",
 		Until:    "2026-04-16T00:00:00Z",
-		Branches: []string{"main"},
 		Generate: true,
 	})
 	if err != nil {
@@ -227,7 +215,6 @@ func TestCloudClient_CreateDispatch_AcceptsBranchesResponseField(t *testing.T) {
 		Repos:    []string{"entireio/cli"},
 		Since:    "2026-04-09T00:00:00Z",
 		Until:    "2026-04-16T00:00:00Z",
-		Branches: []string{"main"},
 		Generate: true,
 	})
 	if err != nil {
@@ -312,52 +299,4 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
-}
-
-func TestCreateDispatchRequest_MarshalJSON_AllBranchesUsesStringSentinel(t *testing.T) {
-	t.Parallel()
-
-	data, err := json.Marshal(CreateDispatchRequest{
-		Repos:       []string{"entireio/cli"},
-		Since:       "2026-04-09T00:00:00Z",
-		Until:       "2026-04-16T00:00:00Z",
-		AllBranches: true,
-		Generate:    true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(data, &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["branches"] != "all" {
-		t.Fatalf("expected branches sentinel, got %v", body["branches"])
-	}
-	if _, ok := body["all_branches"]; ok {
-		t.Fatalf("did not expect internal all_branches field in payload: %v", body)
-	}
-}
-
-func TestCreateDispatchRequest_MarshalJSON_NilBranchesEncodesNull(t *testing.T) {
-	t.Parallel()
-
-	data, err := json.Marshal(CreateDispatchRequest{
-		Repos:    []string{"entireio/cli"},
-		Since:    "2026-04-09T00:00:00Z",
-		Until:    "2026-04-16T00:00:00Z",
-		Generate: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(data, &body); err != nil {
-		t.Fatal(err)
-	}
-	if value, ok := body["branches"]; !ok || value != nil {
-		t.Fatalf("expected branches=null, got %v (present=%t)", value, ok)
-	}
 }
