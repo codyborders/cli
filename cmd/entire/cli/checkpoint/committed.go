@@ -335,8 +335,8 @@ func (s *GitStore) writeStandardCheckpointEntries(ctx context.Context, opts Writ
 					slog.String("write_session_id", opts.SessionID),
 					slog.Bool("existing_summary_nil", existingSummary == nil))
 				return fmt.Errorf(
-					"refusing to overwrite session 0 of checkpoint %s: existing session ID %q differs from write session ID %q (tree corruption or stale summary — run 'entire doctor' to investigate)",
-					opts.CheckpointID, existingMeta.SessionID, opts.SessionID,
+					"refusing to overwrite session 0 of checkpoint %s: existing session ID %q differs from write session ID %q. The checkpoint tree is inconsistent (session 0 belongs to a different session than this write claims). No automated repair exists for this shape — please report it along with the output of `git ls-tree entire/checkpoints/v1 %s/`",
+					opts.CheckpointID, existingMeta.SessionID, opts.SessionID, opts.CheckpointID.Path(),
 				)
 			}
 		}
