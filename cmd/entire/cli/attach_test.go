@@ -18,9 +18,11 @@ import (
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/factoryaidroid" // register agent
 	_ "github.com/entireio/cli/cmd/entire/cli/agent/geminicli"      // register agent
 	"github.com/entireio/cli/cmd/entire/cli/agent/types"
+	cpkg "github.com/entireio/cli/cmd/entire/cli/checkpoint"
 	"github.com/entireio/cli/cmd/entire/cli/paths"
 	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
+	"github.com/entireio/cli/cmd/entire/cli/trailers"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -252,6 +254,121 @@ func TestAttach_V2DualWriteDisabled(t *testing.T) {
 	}
 	if _, err := repo.Reference(plumbing.ReferenceName(paths.V2FullCurrentRefName), true); err == nil {
 		t.Fatalf("did not expect %s when checkpoints_v2 is disabled", paths.V2FullCurrentRefName)
+	}
+}
+
+func TestAttach_AppendsAsAdditionalSessionWhenIDDiffers(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	firstSessionID := "first-session-a-original"
+	setupClaudeTranscript(t, firstSessionID, `{"type":"user","message":{"role":"user","content":"first"},"uuid":"u1"}
+`)
+	var out bytes.Buffer
+	if err := runAttach(context.Background(), &out, firstSessionID, agent.AgentNameClaudeCode, true); err != nil {
+		t.Fatalf("first attach failed: %v", err)
+	}
+
+	repoRoot := mustGetwd(t)
+	repo, err := git.PlainOpen(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headRef, err := repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	headCommit, err := repo.CommitObject(headRef.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingCheckpoints := trailers.ParseAllCheckpoints(headCommit.Message)
+	if len(existingCheckpoints) != 1 {
+		t.Fatalf("expected one Entire-Checkpoint trailer after first attach; got %v", existingCheckpoints)
+	}
+	checkpointID := existingCheckpoints[0]
+
+	secondSessionID := "second-session-b-append"
+	setupClaudeTranscript(t, secondSessionID, `{"type":"user","message":{"role":"user","content":"second"},"uuid":"u1"}
+`)
+	out.Reset()
+	if err := runAttach(context.Background(), &out, secondSessionID, agent.AgentNameClaudeCode, true); err != nil {
+		t.Fatalf("second attach failed: %v", err)
+	}
+
+	store := cpkg.NewGitStore(repo)
+	summary, err := store.ReadCommitted(context.Background(), checkpointID)
+	if err != nil {
+		t.Fatalf("ReadCommitted(%s): %v", checkpointID, err)
+	}
+	if summary == nil {
+		t.Fatalf("checkpoint %s summary nil after two attaches", checkpointID)
+	}
+	if len(summary.Sessions) != 2 {
+		t.Fatalf("checkpoint has %d sessions, want 2", len(summary.Sessions))
+	}
+
+	idx0, err := store.ReadSessionContent(context.Background(), checkpointID, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionContent(0): %v", err)
+	}
+	idx1, err := store.ReadSessionContent(context.Background(), checkpointID, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionContent(1): %v", err)
+	}
+	haveFirst := idx0.Metadata.SessionID == firstSessionID || idx1.Metadata.SessionID == firstSessionID
+	haveSecond := idx0.Metadata.SessionID == secondSessionID || idx1.Metadata.SessionID == secondSessionID
+	if !haveFirst {
+		t.Errorf("first session %q missing from checkpoint; got [%q, %q]",
+			firstSessionID, idx0.Metadata.SessionID, idx1.Metadata.SessionID)
+	}
+	if !haveSecond {
+		t.Errorf("second session %q missing from checkpoint; got [%q, %q]",
+			secondSessionID, idx0.Metadata.SessionID, idx1.Metadata.SessionID)
+	}
+}
+
+func TestAttach_RefusesWhenCheckpointMissingFromLocalBranch(t *testing.T) {
+	setupAttachTestRepo(t)
+
+	repoRoot := mustGetwd(t)
+	runGitInDir(t, repoRoot, "commit", "--amend", "--no-edit", "-m", "init\n\nEntire-Checkpoint: ffffffffeeee")
+
+	sessionID := "orphaned-attach-session"
+	setupClaudeTranscript(t, sessionID, `{"type":"user","message":{"role":"user","content":"attach please"},"uuid":"u1"}
+`)
+
+	var out bytes.Buffer
+	err := runAttach(context.Background(), &out, sessionID, agent.AgentNameClaudeCode, true)
+	if err == nil {
+		t.Fatal("expected error: checkpoint referenced by HEAD is missing locally and attach should refuse")
+	}
+	if !strings.Contains(err.Error(), "missing from the local entire/checkpoints/v1 branch") {
+		t.Errorf("error message should explain the missing-branch situation; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "git fetch origin entire/checkpoints/v1") {
+		t.Errorf("error message should include the fetch command to fix it; got: %v", err)
+	}
+
+	repo, err := git.PlainOpen(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := cpkg.NewGitStore(repo)
+	summary, err := store.ReadCommitted(context.Background(), "ffffffffeeee")
+	if err != nil {
+		t.Fatalf("ReadCommitted: %v", err)
+	}
+	if summary != nil {
+		t.Errorf("attach should NOT have created checkpoint ffffffffeeee locally; found %+v", summary)
+	}
+}
+
+func runGitInDir(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 }
 

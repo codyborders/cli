@@ -79,6 +79,7 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 		// Init failed — logging will use stderr fallback, non-fatal.
 		_ = err
 	}
+	defer logging.Close()
 
 	logCtx := logging.WithComponent(ctx, "attach")
 
@@ -135,8 +136,15 @@ func runAttach(ctx context.Context, w io.Writer, sessionID string, agentName typ
 	// Determine checkpoint ID: reuse from HEAD if one exists, otherwise generate new.
 	checkpointID, isExistingCheckpoint := resolveCheckpointID(headCommit)
 
+	// Refresh the metadata branch if HEAD already references a checkpoint.
+	// Returns a possibly-freshly-opened repo handle; see refreshForExistingCheckpoint.
+	repo = refreshForExistingCheckpoint(ctx, logCtx, repo, isExistingCheckpoint)
+
 	// Write directly to entire/checkpoints/v1.
 	store := cpkg.NewGitStore(repo)
+	if err := verifyCheckpointLocallyAvailable(ctx, store, checkpointID, isExistingCheckpoint); err != nil {
+		return err
+	}
 
 	author, err := GetGitAuthor(ctx)
 	if err != nil {
@@ -242,6 +250,48 @@ func getHeadCommit(repo *git.Repository) (*object.Commit, error) {
 		return nil, fmt.Errorf("failed to get HEAD commit: %w", err)
 	}
 	return commit, nil
+}
+
+// refreshForExistingCheckpoint refreshes the entire/checkpoints/v1 branch
+// before reading or writing when HEAD already references a checkpoint.
+// This mirrors `entire resume`'s metadata fetch fallback chain so attach
+// doesn't operate on a stale local orphan branch after a normal `git pull`.
+// Returns a freshly-opened repo handle so go-git sees any newly fetched
+// packfiles; on fetch failure, logs a warning and returns the original repo.
+func refreshForExistingCheckpoint(ctx, logCtx context.Context, repo *git.Repository, isExistingCheckpoint bool) *git.Repository {
+	if !isExistingCheckpoint {
+		return repo
+	}
+	_, freshRepo, fetchErr := getMetadataTree(ctx)
+	if fetchErr != nil {
+		logging.Warn(logCtx, "failed to refresh metadata branch before attach; proceeding with local state",
+			slog.String("error", fetchErr.Error()))
+		return repo
+	}
+	return freshRepo
+}
+
+// verifyCheckpointLocallyAvailable refuses the attach when HEAD references
+// an Entire-Checkpoint that is still missing from the local
+// entire/checkpoints/v1 branch after refresh. Without this guard, attach
+// would create a fresh checkpoint under the same ID and overwrite the
+// original session data on push.
+func verifyCheckpointLocallyAvailable(ctx context.Context, store *cpkg.GitStore, checkpointID id.CheckpointID, isExistingCheckpoint bool) error {
+	if !isExistingCheckpoint {
+		return nil
+	}
+	summary, readErr := store.ReadCommitted(ctx, checkpointID)
+	if readErr != nil {
+		return fmt.Errorf("failed to read checkpoint %s: %w", checkpointID, readErr)
+	}
+	if summary != nil {
+		return nil
+	}
+	const fetchCmd = "git fetch origin entire/checkpoints/v1:entire/checkpoints/v1"
+	return fmt.Errorf(
+		"checkpoint %s referenced by HEAD is missing from the local entire/checkpoints/v1 branch (the remote fetch didn't bring it in either). Creating a fresh checkpoint here would overwrite the original session data on push. Run:\n\n    %s\n\nthen re-run attach. If the colleague who made this commit hasn't pushed their checkpoint metadata yet, ask them to do so first",
+		checkpointID.String(), fetchCmd,
+	)
 }
 
 // resolveCheckpointID returns the checkpoint ID to use for the attach.
