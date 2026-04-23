@@ -12,10 +12,7 @@ import (
 	"github.com/entireio/cli/cmd/entire/cli/settings"
 )
 
-const (
-	originRemote          = "origin"
-	checkpointTokenEnvVar = "ENTIRE_CHECKPOINT_TOKEN"
-)
+const originRemote = "origin"
 
 const (
 	ProtocolSSH   = gitremote.ProtocolSSH
@@ -33,7 +30,7 @@ type Info = gitremote.Info
 // If ENTIRE_CHECKPOINT_TOKEN is set and a checkpoint remote is configured, HTTPS is
 // forced so the token can be used even when origin is configured via SSH.
 func FetchURL(ctx context.Context) (string, error) {
-	withToken := strings.TrimSpace(os.Getenv(checkpointTokenEnvVar)) != ""
+	withToken := strings.TrimSpace(os.Getenv(CheckpointTokenEnvVar)) != ""
 
 	originURL, originErr := GetRemoteURL(ctx, originRemote)
 	if originErr != nil {
@@ -162,7 +159,7 @@ func PushURL(ctx context.Context, pushRemoteName string) (string, bool, error) {
 		}
 		return "", true, fmt.Errorf("no push URL found: %w", err)
 	}
-	if strings.TrimSpace(os.Getenv(checkpointTokenEnvVar)) != "" {
+	if strings.TrimSpace(os.Getenv(CheckpointTokenEnvVar)) != "" {
 		pushInfo = &Info{
 			Protocol: ProtocolHTTPS,
 			Host:     pushInfo.Host,
@@ -294,7 +291,7 @@ func logFallback(ctx context.Context, operation, fallbackURL, reason string, err
 
 func resolvePushFallbackURL(ctx context.Context, pushRemoteName, originURL string) (string, error) {
 	if originURL != "" {
-		if strings.TrimSpace(os.Getenv(checkpointTokenEnvVar)) != "" {
+		if strings.TrimSpace(os.Getenv(CheckpointTokenEnvVar)) != "" {
 			if tokenURL, ok := deriveTokenOriginURL(originURL); ok {
 				return tokenURL, nil
 			}
@@ -308,7 +305,7 @@ func resolvePushFallbackURL(ctx context.Context, pushRemoteName, originURL strin
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(os.Getenv(checkpointTokenEnvVar)) != "" {
+	if strings.TrimSpace(os.Getenv(CheckpointTokenEnvVar)) != "" {
 		if tokenURL, ok := deriveTokenOriginURL(pushURL); ok {
 			return tokenURL, nil
 		}

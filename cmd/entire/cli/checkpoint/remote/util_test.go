@@ -68,7 +68,7 @@ func TestFetchURL(t *testing.T) {
 			writeSettings(t, repoDir, tt.settingsJSON)
 			t.Chdir(repoDir)
 			if tt.token != "" {
-				t.Setenv(checkpointTokenEnvVar, tt.token)
+				t.Setenv(CheckpointTokenEnvVar, tt.token)
 			}
 
 			got, err := FetchURL(context.Background())
@@ -162,7 +162,7 @@ func TestFetchURL_EdgeCases(t *testing.T) {
 			writeSettings(t, repoDir, tt.settingsJSON)
 			t.Chdir(repoDir)
 			if tt.token != "" {
-				t.Setenv(checkpointTokenEnvVar, tt.token)
+				t.Setenv(CheckpointTokenEnvVar, tt.token)
 			}
 
 			got, err := FetchURL(context.Background())
@@ -297,7 +297,7 @@ func TestPushURL(t *testing.T) {
 			writeSettings(t, repoDir, tt.settingsJSON)
 			t.Chdir(repoDir)
 			if tt.token != "" {
-				t.Setenv(checkpointTokenEnvVar, tt.token)
+				t.Setenv(CheckpointTokenEnvVar, tt.token)
 			}
 
 			gotURL, gotEnabled, err := PushURL(context.Background(), tt.pushRemote)
