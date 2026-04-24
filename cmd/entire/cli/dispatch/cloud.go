@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/api"
+	"github.com/entireio/cli/cmd/entire/cli/logging"
 )
 
 type CloudConfig struct {
@@ -187,10 +188,11 @@ func (c *CloudClient) doJSON(ctx context.Context, method, path string, reqBody, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) //nolint:errcheck // best-effort body read for error message
 		trimmed := strings.TrimSpace(string(body))
+		logging.Warn(ctx, "dispatch request failed", "method", method, "path", path, "status_code", resp.StatusCode)
 		if trimmed == "" {
-			return fmt.Errorf("%s %s: unexpected status %d", method, path, resp.StatusCode)
+			return fmt.Errorf("dispatch service returned status %d", resp.StatusCode)
 		}
-		return fmt.Errorf("%s %s: unexpected status %d: %s", method, path, resp.StatusCode, strconv.Quote(trimmed))
+		return fmt.Errorf("dispatch service returned status %d: %s", resp.StatusCode, strconv.Quote(trimmed))
 	}
 	if out == nil {
 		return nil

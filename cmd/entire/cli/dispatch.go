@@ -67,7 +67,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().BoolVar(&flagLocal, "local", false, "use local LLM tokens instead of server synthesis")
+	cmd.Flags().BoolVar(&flagLocal, "local", false, "generate via the locally-installed agent CLI instead of the Entire server")
 	cmd.Flags().StringVar(&flagSince, "since", "7d", "time window (Go duration, relative time, or ISO date)")
 	cmd.Flags().StringVar(&flagUntil, "until", "", "window end time (defaults to now)")
 	cmd.Flags().BoolVar(&flagAllBranches, "all-branches", false, "include every existing local branch (--local only; renamed or deleted branches are skipped)")

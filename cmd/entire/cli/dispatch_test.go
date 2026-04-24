@@ -187,6 +187,20 @@ func TestNewDispatchCmd_InsecureHTTPAuthFlagIsHidden(t *testing.T) {
 	}
 }
 
+func TestNewDispatchCmd_LocalHelpText(t *testing.T) {
+	t.Parallel()
+
+	cmd := newDispatchCmd()
+	flag := cmd.Flags().Lookup("local")
+	if flag == nil {
+		t.Fatal("expected --local flag to be registered")
+	}
+	want := "generate via the locally-installed agent CLI instead of the Entire server"
+	if flag.Usage != want {
+		t.Fatalf("unexpected --local help text: %q", flag.Usage)
+	}
+}
+
 func TestShouldRunDispatchWizard(t *testing.T) {
 	t.Parallel()
 

@@ -3,8 +3,11 @@ package dispatch
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var githubRepoSlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$`)
 
 func ResolveOptions(
 	flagLocal bool,
@@ -23,6 +26,11 @@ func ResolveOptions(
 	}
 	if !flagLocal && flagAllBranches {
 		return Options{}, errors.New("--all-branches only applies to --local (cloud dispatch uses each repo's default branch)")
+	}
+	if !flagLocal {
+		if err := validateRepoSlugs(flagRepos); err != nil {
+			return Options{}, err
+		}
 	}
 	if !flagLocal && len(flagRepos) > CloudRepoLimit {
 		return Options{}, fmt.Errorf("--repos supports at most %d repos per dispatch", CloudRepoLimit)
@@ -72,4 +80,13 @@ func normalizeScopeValues(values []string) []string {
 		normalized = append(normalized, value)
 	}
 	return normalized
+}
+
+func validateRepoSlugs(values []string) error {
+	for _, value := range values {
+		if !githubRepoSlugPattern.MatchString(value) {
+			return fmt.Errorf("invalid repo %q: expected owner/repo", value)
+		}
+	}
+	return nil
 }

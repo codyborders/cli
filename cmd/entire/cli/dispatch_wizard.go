@@ -229,10 +229,6 @@ func runDispatchWizard(cmd *cobra.Command) (dispatchpkg.Options, error) {
 		return buildDispatchRepoOptions(slugs)
 	})
 
-	// Prefetch repos in the background so Cloud users don't block on gh calls
-	// once they reach the repo picker.
-	go loadRepos()
-
 	state := newDispatchWizardState()
 	currentBranch, err := getDispatchWizardCurrentBranch(ctx)
 	if err != nil {

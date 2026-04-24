@@ -137,3 +137,21 @@ func TestResolveOptions_LocalAllBranchesSkipsImplicit(t *testing.T) {
 		t.Fatalf("expected nil branches when AllBranches is set, got %v", opts.Branches)
 	}
 }
+
+func TestResolveOptions_CloudRejectsInvalidRepoSlug(t *testing.T) {
+	t.Parallel()
+
+	_, err := ResolveOptions(
+		false,
+		"7d",
+		"",
+		false,
+		[]string{"../../etc/passwd"},
+		"",
+		false,
+		func() (string, error) { return testDefaultBranchName, nil },
+	)
+	if err == nil || !strings.Contains(err.Error(), `invalid repo "../../etc/passwd": expected owner/repo`) {
+		t.Fatalf("expected repo slug validation error, got %v", err)
+	}
+}

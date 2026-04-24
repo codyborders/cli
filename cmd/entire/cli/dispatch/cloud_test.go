@@ -162,6 +162,12 @@ func TestCloudClient_CreateDispatch_EscapesErrorBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	if !strings.Contains(err.Error(), "dispatch service returned status 502") {
+		t.Fatalf("expected simplified status error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "/api/v1/dispatches/generate") {
+		t.Fatalf("did not expect endpoint path in user-facing error, got %v", err)
+	}
 	if !strings.Contains(err.Error(), strconv.Quote("\x1b[31mboom\x1b[0m")) {
 		t.Fatalf("expected quoted error body, got %v", err)
 	}

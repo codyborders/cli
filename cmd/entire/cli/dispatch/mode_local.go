@@ -293,15 +293,15 @@ func runGitOutput(ctx context.Context, repoRoot string, args ...string) (string,
 func resolveRepoFullName(repo *git.Repository) (string, error) {
 	remote, err := repo.Remote("origin")
 	if err != nil {
-		return "", fmt.Errorf("find origin remote: %w", err)
+		return "", errors.New("dispatch currently supports GitHub repositories with an origin remote")
 	}
 	if len(remote.Config().URLs) == 0 {
-		return "", errors.New("origin remote has no URLs configured")
+		return "", errors.New("dispatch currently supports GitHub repositories with an origin remote URL")
 	}
 
 	owner, repoName, err := search.ParseGitHubRemote(remote.Config().URLs[0])
 	if err != nil {
-		return "", fmt.Errorf("parse github remote: %w", err)
+		return "", errors.New("dispatch currently supports GitHub origin remotes only")
 	}
 	return owner + "/" + repoName, nil
 }
