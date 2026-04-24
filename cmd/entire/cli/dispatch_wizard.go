@@ -380,10 +380,9 @@ func newLazyOptions(loader func() []huh.Option[string]) func() []huh.Option[stri
 	}
 }
 
-// buildDispatchRepoOptions preserves the caller's ordering so the API's
-// recent-first sort surfaces first in the picker. Callers that want
-// alphabetical ordering (e.g. the local-discovery fallback) sort before
-// calling.
+// buildDispatchRepoOptions dedupes but preserves the caller's order so each
+// source can pick its own order: the API path surfaces recent-first, and the
+// local-discovery fallback surfaces the current repo first.
 func buildDispatchRepoOptions(slugs []string) []huh.Option[string] {
 	options := make([]huh.Option[string], 0, len(slugs))
 	seen := make(map[string]struct{}, len(slugs))
