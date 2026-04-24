@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,6 +12,12 @@ import (
 	"github.com/go-git/go-git/v6/x/plugin"
 	"github.com/spf13/cobra"
 )
+
+type rootTestSigner struct{}
+
+func (rootTestSigner) Sign(io.Reader) ([]byte, error) {
+	return []byte("sig"), nil
+}
 
 func TestVersionFlag_OutputMatchesVersionCmd(t *testing.T) {
 	t.Parallel()
@@ -73,15 +80,38 @@ func TestVersionFlag_ContainsExpectedInfo(t *testing.T) {
 func TestRegisterObjectSigner_RegistersPlugin(t *testing.T) {
 	resetPluginEntry("object-signer")
 	registerObjectSignerOnce = sync.Once{}
+	objectSignerLoader = func() (plugin.Signer, bool) {
+		return rootTestSigner{}, true
+	}
 	t.Cleanup(func() {
 		resetPluginEntry("object-signer")
 		registerObjectSignerOnce = sync.Once{}
+		objectSignerLoader = loadObjectSigner
 	})
 
 	RegisterObjectSigner()
 
 	if !plugin.Has(plugin.ObjectSigner()) {
 		t.Fatal("expected object signer plugin to be registered")
+	}
+}
+
+func TestRegisterObjectSigner_SkipsRegistrationWhenSigningDisabled(t *testing.T) {
+	resetPluginEntry("object-signer")
+	registerObjectSignerOnce = sync.Once{}
+	objectSignerLoader = func() (plugin.Signer, bool) {
+		return nil, false
+	}
+	t.Cleanup(func() {
+		resetPluginEntry("object-signer")
+		registerObjectSignerOnce = sync.Once{}
+		objectSignerLoader = loadObjectSigner
+	})
+
+	RegisterObjectSigner()
+
+	if plugin.Has(plugin.ObjectSigner()) {
+		t.Fatal("expected object signer plugin to be skipped when signing is disabled")
 	}
 }
 
