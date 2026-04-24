@@ -66,7 +66,7 @@ func loadObjectSigner() (plugin.Signer, bool) { //nolint:ireturn // plugin regis
 		SSHAgent:   connectSSHAgent(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to create object signer: %v\n", err)
+		logging.Debug(context.Background(), "failed to create object signer", "error", err.Error())
 		return nil, false
 	}
 
